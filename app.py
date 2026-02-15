@@ -1,5 +1,5 @@
 import streamlit as st
-from openai import OpenAI
+import google.generativeai as genai
 from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 import pandas as pd
@@ -7,9 +7,12 @@ from datetime import datetime
 import random
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
-client = OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
-conn = st.connection('gsheets', type=GSheetsConnection)
 
+# Configura Gemini invece di OpenAI
+genai.configure(api_key=st.secrets['GEMINI_API_KEY'])
+model = genai.GenerativeModel('gemini-1.5-flash')
+
+conn = st.connection('gsheets', type=GSheetsConnection)
 st_autorefresh(interval=15000, key='global_refresh')
 
 if 'autenticato' not in st.session_state:
@@ -70,18 +73,23 @@ if action := st.chat_input('Narra la tua mossa...'):
         new_user_row = pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': pg['nome_pg'], 'testo': user_msg}])
         df_chat_upd = pd.concat([df_chat, new_user_row], ignore_index=True)
         
-        master_prompt = (
+        master_instr = (
             'Sei il Master di Apocrypha, un DM di D&D brutale e descrittivo. '
             'Narra in modo articolato. Genera contesto crudo. Descrivi la puzza, il riverbero delle torce, il rumore di ossa. '
             'Se c e un d20: 1-10 fallimento atroce, 11-15 successo risicato, 16-19 colpo da maestro, 20 leggenda. '
             'Sii articolato, oscuro e crudo. Reagisci ai dettagli del giocatore per espandere il mondo.'
         )
         
-        history = [{'role': 'system', 'content': master_prompt}]
+        # Costruisci la cronologia per Gemini
+        history = []
         for _, r in df_chat_upd.tail(15).iterrows():
-            history.append({'role': 'assistant' if r['autore'] == 'Master' else 'user', 'content': f"{r['autore']}: {r['testo']}"})
+            history.append(f"{r['autore']}: {r['testo']}")
         
-        ai_resp = client.chat.completions.create(model='gpt-4o', messages=history).choices[0].message.content
+        full_prompt = f"{master_instr}\n\nCronologia:\n" + "\n".join(history) + "\n\nMaster:"
+        
+        response = model.generate_content(full_prompt)
+        ai_resp = response.text
+        
         df_final = pd.concat([df_chat_upd, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': ai_resp}])], ignore_index=True)
         
         conn.update(worksheet='messaggi', data=df_final)
