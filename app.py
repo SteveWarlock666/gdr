@@ -1,105 +1,70 @@
 import streamlit as st
 from openai import OpenAI
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+from datetime import datetime
 
-st.set_page_config(page_title="Apocrypha RPG", page_icon="⚔️")
+st.set_page_config(page_title="Apocrypha Multiplayer", page_icon="⚔️")
 
-if "OPENAI_API_KEY" in st.secrets:
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-else:
-    st.error("Inserisci la API Key nei Secrets di Streamlit!")
-    st.stop()
+# Collegamento API e Database
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-if "fase" not in st.session_state:
-    st.session_state.fase = "login"
+# --- LOGIN ---
+if "autenticato" not in st.session_state:
+    st.session_state.autenticato = False
 
-# 1. LOGIN
-if st.session_state.fase == "login":
-    st.title("🛡️ Accesso ad Apocrypha")
-    pwd = st.text_input("Password del Regno:", type="password")
+if not st.session_state.autenticato:
+    st.title("🛡️ Entra nella Stanza di Apocrypha")
+    user = st.text_input("Tuo Nome Reale:")
+    pwd = st.text_input("Password:", type="password")
     if st.button("Entra"):
-        if pwd == "apocrypha2026":
-            st.session_state.fase = "creazione_pg"
+        if pwd == "apocrypha2026" and user:
+            st.session_state.autenticato = True
+            st.session_state.username = user
             st.rerun()
-        else:
-            st.error("Password errata.")
     st.stop()
 
-# 2. CREAZIONE PERSONAGGIO
-if st.session_state.fase == "creazione_pg":
-    st.title("🖋️ Crea il tuo Eroe")
-    nome = st.text_input("Nome del Personaggio:")
-    razza = st.selectbox("Razza:", ["Fenrithar", "Elling", "Elpide", "Minotauro", "Narun", "Feyrin", "Primaris", "Inferis"])
-    classe = st.selectbox("Classe:", ["Orrenai", "Armagister", "Mago"])
+# --- SIDEBAR: SCHEDA E GIOCATORI ---
+with st.sidebar:
+    st.header("👥 Giocatori Online")
+    st.write(f"Tu: **{st.session_state.username}**")
+    st.divider()
+    if st.button("Aggiorna Chat 🔄"):
+        st.rerun()
+
+# --- CARICAMENTO MESSAGGI GLOBALI ---
+# Leggiamo i messaggi dal foglio "messaggi" (crea un secondo foglio nel tuo Sheets chiamato 'messaggi')
+try:
+    all_msgs = conn.read(worksheet="messaggi")
+except:
+    all_msgs = pd.DataFrame(columns=["data", "autore", "testo"])
+
+st.title("⚔️ Apocrypha: Chat Globale")
+
+# Mostra la cronologia condivisa
+for index, row in all_msgs.tail(20).iterrows():
+    with st.chat_message(row["autore"]):
+        st.write(f"**{row['autore']}**: {row['testo']}")
+
+# --- INVIO MESSAGGIO ---
+if prompt := st.chat_input("Fai la tua mossa..."):
+    # 1. Salva il messaggio del giocatore sul database
+    nuovo_msg = pd.DataFrame([{"data": datetime.now(), "autore": st.session_state.username, "testo": prompt}])
+    updated_df = pd.concat([all_msgs, nuovo_msg], ignore_index=True)
+    conn.update(worksheet="messaggi", data=updated_df)
     
-    if st.button("Inizia l'Avventura"):
-        if nome:
-            st.session_state.pg = {"nome": nome, "razza": razza, "classe": classe, "hp": 100}
-            st.session_state.fase = "chat"
-            st.rerun()
-        else:
-            st.warning("Dai un nome al tuo personaggio!")
-    st.stop()
-
-# 3. GIOCO E CHAT
-if st.session_state.fase == "chat":
-    pg = st.session_state.pg
+    # 2. Chiedi all'IA di rispondere a TUTTA la conversazione
+    context = [{"role": "system", "content": "Sei il Master di un gruppo. Rispondi all'ultimo messaggio tenendo conto della storia."}]
+    for i, r in all_msgs.tail(5).iterrows():
+        context.append({"role": "user" if r["autore"] != "Master" else "assistant", "content": r["testo"]})
+    context.append({"role": "user", "content": prompt})
     
-    with st.sidebar:
-        st.header("📜 Scheda Personaggio")
-        st.markdown(f"**Nome:** {pg['nome']}")
-        st.markdown(f"**Razza:** {pg['razza']}")
-        st.markdown(f"**Classe:** {pg['classe']}")
-        
-        # Barra della Salute
-        st.write(f"❤️ Salute: {pg['hp']}/100")
-        st.progress(pg['hp'] / 100)
-        
-        if st.button("Reset / Nuovo PG"):
-            st.session_state.fase = "login"
-            st.session_state.messages = []
-            st.rerun()
-
-    st.title(f"⚔️ Apocrypha: {pg['nome']}")
-
-    PROMPT_SISTEMA = f"""
-    Sei il Master di Apocrypha. Il giocatore è {pg['nome']}, un {pg['razza']} {pg['classe']}.
-    Salute attuale: {pg['hp']}/100.
-    REGOLE:
-    1. Parla solo italiano, tono dark fantasy e crudo.
-    2. Se il giocatore subisce danni, scrivi alla fine del messaggio: [DANNO: X] dove X è il numero di punti persi.
-    3. Se il giocatore beve una pozione o si cura, scrivi: [CURA: X].
-    4. Non decidere mai le azioni del giocatore.
-    """
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "system", "content": PROMPT_SISTEMA}]
-        st.session_state.messages.append({"role": "assistant", "content": f"L'oscurità ti avvolge, {pg['nome']}. Sei pronto?"})
-
-    for msg in st.session_state.messages:
-        if msg["role"] != "system":
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-
-    if prompt := st.chat_input("Cosa fai?"):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.markdown(prompt)
-
-        with st.chat_message("assistant"):
-            stream = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages, stream=True)
-            response = st.write_stream(stream)
-            
-            # Controllo automatico dei danni nel testo dell'IA
-            if "[DANNO:" in response:
-                try:
-                    valore = int(response.split("[DANNO:")[1].split("]")[0].strip())
-                    st.session_state.pg['hp'] = max(0, st.session_state.pg['hp'] - valore)
-                    st.rerun()
-                except: pass
-            if "[CURA:" in response:
-                try:
-                    valore = int(response.split("[CURA:")[1].split("]")[0].strip())
-                    st.session_state.pg['hp'] = min(100, st.session_state.pg['hp'] + valore)
-                    st.rerun()
-                except: pass
-
-        st.session_state.messages.append({"role": "assistant", "content": response})
+    response = client.chat.completions.create(model="gpt-4o", messages=context).choices[0].message.content
+    
+    # 3. Salva la risposta del Master sul database
+    ia_msg = pd.DataFrame([{"data": datetime.now(), "autore": "Master", "testo": response}])
+    final_df = pd.concat([updated_df, ia_msg], ignore_index=True)
+    conn.update(worksheet="messaggi", data=final_df)
+    
+    st.rerun()
