@@ -8,89 +8,76 @@ import random
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
-# Configura Gemini invece di OpenAI
 genai.configure(api_key=st.secrets['GEMINI_API_KEY'])
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 conn = st.connection('gsheets', type=GSheetsConnection)
-st_autorefresh(interval=15000, key='global_refresh')
+st_autorefresh(interval=15000, key='refresh')
 
-if 'autenticato' not in st.session_state:
-    st.session_state.autenticato = False
+if 'auth' not in st.session_state:
+    st.session_state.auth = False
 
-if not st.session_state.autenticato:
-    user = st.text_input('Chi osa entrare?')
-    pwd = st.text_input('Parola d ordine:', type='password')
+if not st.session_state.auth:
+    u = st.text_input('Chi osa entrare?')
+    p = st.text_input('Parola d ordine:', type='password')
     if st.button('Apri il portale'):
-        if pwd == 'apocrypha2026' and user:
-            st.session_state.autenticato = True
-            st.session_state.username = user
+        if p == 'apocrypha2026' and u:
+            st.session_state.auth = True
+            st.session_state.user = u
             st.rerun()
     st.stop()
 
-def load_world():
-    df_pg = conn.read(worksheet='personaggi', ttl=0)
-    df_chat = conn.read(worksheet='messaggi', ttl=0)
-    return df_pg, df_chat
+def load():
+    p = conn.read(worksheet='personaggi', ttl=0)
+    m = conn.read(worksheet='messaggi', ttl=0)
+    return p, m
 
-df_pg, df_chat = load_world()
+df_p, df_m = load()
 
 with st.sidebar:
     st.title('APOCRYPHA')
     st.header('Anime nell ombra')
-    for _, row in df_pg.iterrows():
+    for _, r in df_p.iterrows():
         with st.container(border=True):
-            st.subheader(f"{row['nome_pg']}")
-            st.caption(f"{row['razza']} {row['classe']}")
-            hp_val = int(row['hp'])
-            st.progress(hp_val / 100, text=f"HP: {hp_val}")
+            st.markdown(f"**{r['nome_pg']}**")
+            st.caption(f"{r['razza']} {r['classe']}")
+            hp = int(r['hp'])
+            st.progress(hp / 100, text=f"HP: {hp}")
     
-    if st.session_state.username not in df_pg['username'].values.astype(str):
+    if st.session_state.user not in df_p['username'].values.astype(str):
         st.divider()
-        st.subheader('Incarna un Eroe')
-        n_pg = st.text_input('Nome:')
-        r_pg = st.selectbox('Razza:', ['Fenrithar', 'Elling', 'Elpide', 'Minotauro', 'Narun', 'Feyrin', 'Primaris', 'Inferis'])
-        c_pg = st.selectbox('Classe:', ['Orrenai', 'Armagister', 'Mago'])
-        if st.button('Prendi vita'):
-            if n_pg:
-                new_data = pd.DataFrame([{'username': st.session_state.username, 'nome_pg': n_pg, 'razza': r_pg, 'classe': c_pg, 'hp': 100}])
-                conn.update(worksheet='personaggi', data=pd.concat([df_pg, new_data], ignore_index=True))
+        n = st.text_input('Nome PG:')
+        raz = st.selectbox('Razza:', ['Fenrithar', 'Elling', 'Elpide', 'Minotauro', 'Narun', 'Feyrin', 'Primaris', 'Inferis'])
+        cla = st.selectbox('Classe:', ['Orrenai', 'Armagister', 'Mago'])
+        if st.button('Incarna'):
+            if n:
+                new = pd.DataFrame([{'username': st.session_state.user, 'nome_pg': n, 'razza': raz, 'classe': cla, 'hp': 100}])
+                conn.update(worksheet='personaggi', data=pd.concat([df_p, new], ignore_index=True))
                 st.rerun()
 
 st.title('Cronaca dell Abisso')
 
-for _, row in df_chat.tail(25).iterrows():
-    role = 'assistant' if row['autore'] == 'Master' else 'user'
+for _, r in df_m.tail(20).iterrows():
+    role = 'assistant' if r['autore'] == 'Master' else 'user'
     with st.chat_message(role):
-        st.write(f"**{row['autore']}**: {row['testo']}")
+        st.write(f"**{r['autore']}**: {r['testo']}")
 
-if action := st.chat_input('Narra la tua mossa...'):
-    pg_row = df_pg[df_pg['username'] == st.session_state.username]
-    if not pg_row.empty:
-        pg = pg_row.iloc[0]
-        dice_tag = f" [d20: {random.randint(1, 20)}]" if any(t in action.lower() for t in ['provo', 'tento', 'cerco', 'attacco', 'colpisco', 'indago', 'furtivo', 'percepisco', 'ascolto', 'lancio']) else ''
-        user_msg = f'{action}{dice_tag}'
-        new_user_row = pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': pg['nome_pg'], 'testo': user_msg}])
-        df_chat_upd = pd.concat([df_chat, new_user_row], ignore_index=True)
+if act := st.chat_input('Narra la tua mossa...'):
+    p_row = df_p[df_p['username'] == st.session_state.user]
+    if not p_row.empty:
+        pg = p_row.iloc[0]
+        dt = f" [d20: {random.randint(1, 20)}]" if any(t in act.lower() for t in ['provo', 'tento', 'attacco', 'colpisco', 'percepisco', 'lancio']) else ''
+        msg = f'{act}{dt}'
+        u_row = pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': pg['nome_pg'], 'testo': msg}])
+        df_m_up = pd.concat([df_m, u_row], ignore_index=True)
         
-        master_instr = (
-            'Sei il Master di Apocrypha, un DM di D&D brutale e descrittivo. '
-            'Narra in modo articolato. Genera contesto crudo. Descrivi la puzza, il riverbero delle torce, il rumore di ossa. '
-            'Se c e un d20: 1-10 fallimento atroce, 11-15 successo risicato, 16-19 colpo da maestro, 20 leggenda. '
-            'Sii articolato, oscuro e crudo. Reagisci ai dettagli del giocatore per espandere il mondo.'
+        prompt = (
+            'Sei il Master di Apocrypha, un DM di D&D brutale. Narra in modo oscuro e crudo. '
+            'Descrivi l ambiente e le sensazioni. Se vedi un d20: 1-10 fallimento, 11-15 scarso, 16-19 ottimo, 20 critico. '
+            'Cronologia:\n' + '\n'.join([f"{r['autore']}: {r['testo']}" for _, r in df_m_up.tail(10).iterrows()])
         )
         
-        # Costruisci la cronologia per Gemini
-        history = []
-        for _, r in df_chat_upd.tail(15).iterrows():
-            history.append(f"{r['autore']}: {r['testo']}")
-        
-        full_prompt = f"{master_instr}\n\nCronologia:\n" + "\n".join(history) + "\n\nMaster:"
-        
-        response = model.generate_content(full_prompt)
-        ai_resp = response.text
-        
-        df_final = pd.concat([df_chat_upd, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': ai_resp}])], ignore_index=True)
-        
-        conn.update(worksheet='messaggi', data=df_final)
+        res = model.generate_content(prompt).text
+        m_row = pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])
+        conn.update(worksheet='messaggi', data=pd.concat([df_m_up, m_row], ignore_index=True))
         st.rerun()
