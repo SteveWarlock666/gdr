@@ -1,64 +1,105 @@
 import streamlit as st
 from openai import OpenAI
 
-# --- CONFIGURAZIONE ---
 st.set_page_config(page_title="Apocrypha RPG", page_icon="⚔️")
-client = OpenAI(api_key="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") # Metti la tua chiave tra le virgolette
-PASSWORD_ACCESSO = "apocrypha2026" # Scegli la password per i tuoi amici
 
-# --- LOGIN ---
-if "autenticato" not in st.session_state:
-    st.session_state.autenticato = False
-
-if not st.session_state.autenticato:
-    st.title("Benvenuto in Apocrypha")
-    pwd = st.text_input("Inserisci la chiave del regno per entrare:", type="password")
-    if st.button("Entra"):
-        if pwd == PASSWORD_ACCESSO:
-            st.session_state.autenticato = True
-            st.rerun()
-        else:
-            st.error("Password errata, l'oscurità ti respinge.")
+if "OPENAI_API_KEY" in st.secrets:
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+else:
+    st.error("Inserisci la API Key nei Secrets di Streamlit!")
     st.stop()
 
-# --- REGOLE DEL MONDO (Il tuo JSON trasformato in Prompt) ---
-PROMPT_SISTEMA = """
-Sei il Game Master di Apocrypha, un RPG dark fantasy. 
-REGOLE FISSE:
-1. Parla SEMPRE E SOLO in ITALIANO.
-2. Non decidere mai le azioni dei giocatori.
-3. Il mondo è crudo, la magia è pericolosa.
-4. Razze: Fenrithar (vampiri), Elling (ibridi), Elpide (volpi), Minotauro, Narun (ombre), Feyrin (fati), Primaris, Inferis.
-5. Location: Abisso di Ossidiana (dungeon senziente).
-6. Se avviene un combattimento, descrivilo in modo narrativo e cruento.
-"""
+if "fase" not in st.session_state:
+    st.session_state.fase = "login"
 
-# --- GESTIONE CHAT ---
-st.title("⚔️ Apocrypha: L'Abisso di Ossidiana")
+# 1. LOGIN
+if st.session_state.fase == "login":
+    st.title("🛡️ Accesso ad Apocrypha")
+    pwd = st.text_input("Password del Regno:", type="password")
+    if st.button("Entra"):
+        if pwd == "apocrypha2026":
+            st.session_state.fase = "creazione_pg"
+            st.rerun()
+        else:
+            st.error("Password errata.")
+    st.stop()
 
-if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "system", "content": PROMPT_SISTEMA}]
-    # Messaggio di inizio
-    st.session_state.messages.append({"role": "assistant", "content": "L'aria nell'Abisso è pesante. Siete davanti al grande portone di ossidiana. Chi siete e cosa fate?"})
+# 2. CREAZIONE PERSONAGGIO
+if st.session_state.fase == "creazione_pg":
+    st.title("🖋️ Crea il tuo Eroe")
+    nome = st.text_input("Nome del Personaggio:")
+    razza = st.selectbox("Razza:", ["Fenrithar", "Elling", "Elpide", "Minotauro", "Narun", "Feyrin", "Primaris", "Inferis"])
+    classe = st.selectbox("Classe:", ["Orrenai", "Armagister", "Mago"])
+    
+    if st.button("Inizia l'Avventura"):
+        if nome:
+            st.session_state.pg = {"nome": nome, "razza": razza, "classe": classe, "hp": 100}
+            st.session_state.fase = "chat"
+            st.rerun()
+        else:
+            st.warning("Dai un nome al tuo personaggio!")
+    st.stop()
 
-# Mostra i messaggi precedenti
-for msg in st.session_state.messages:
-    if msg["role"] != "system":
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+# 3. GIOCO E CHAT
+if st.session_state.fase == "chat":
+    pg = st.session_state.pg
+    
+    with st.sidebar:
+        st.header("📜 Scheda Personaggio")
+        st.markdown(f"**Nome:** {pg['nome']}")
+        st.markdown(f"**Razza:** {pg['razza']}")
+        st.markdown(f"**Classe:** {pg['classe']}")
+        
+        # Barra della Salute
+        st.write(f"❤️ Salute: {pg['hp']}/100")
+        st.progress(pg['hp'] / 100)
+        
+        if st.button("Reset / Nuovo PG"):
+            st.session_state.fase = "login"
+            st.session_state.messages = []
+            st.rerun()
 
-# Input del giocatore
-if prompt := st.chat_input("Cosa fai?"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    st.title(f"⚔️ Apocrypha: {pg['nome']}")
 
-    # Risposta dell'IA
-    with st.chat_message("assistant"):
-        stream = client.chat.completions.create(
-            model="gpt-4o", # Il modello più cazzuto
-            messages=st.session_state.messages,
-            stream=True,
-        )
-        response = st.write_stream(stream)
-    st.session_state.messages.append({"role": "assistant", "content": response})
+    PROMPT_SISTEMA = f"""
+    Sei il Master di Apocrypha. Il giocatore è {pg['nome']}, un {pg['razza']} {pg['classe']}.
+    Salute attuale: {pg['hp']}/100.
+    REGOLE:
+    1. Parla solo italiano, tono dark fantasy e crudo.
+    2. Se il giocatore subisce danni, scrivi alla fine del messaggio: [DANNO: X] dove X è il numero di punti persi.
+    3. Se il giocatore beve una pozione o si cura, scrivi: [CURA: X].
+    4. Non decidere mai le azioni del giocatore.
+    """
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = [{"role": "system", "content": PROMPT_SISTEMA}]
+        st.session_state.messages.append({"role": "assistant", "content": f"L'oscurità ti avvolge, {pg['nome']}. Sei pronto?"})
+
+    for msg in st.session_state.messages:
+        if msg["role"] != "system":
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+    if prompt := st.chat_input("Cosa fai?"):
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"): st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            stream = client.chat.completions.create(model="gpt-4o", messages=st.session_state.messages, stream=True)
+            response = st.write_stream(stream)
+            
+            # Controllo automatico dei danni nel testo dell'IA
+            if "[DANNO:" in response:
+                try:
+                    valore = int(response.split("[DANNO:")[1].split("]")[0].strip())
+                    st.session_state.pg['hp'] = max(0, st.session_state.pg['hp'] - valore)
+                    st.rerun()
+                except: pass
+            if "[CURA:" in response:
+                try:
+                    valore = int(response.split("[CURA:")[1].split("]")[0].strip())
+                    st.session_state.pg['hp'] = min(100, st.session_state.pg['hp'] + valore)
+                    st.rerun()
+                except: pass
+
+        st.session_state.messages.append({"role": "assistant", "content": response})
