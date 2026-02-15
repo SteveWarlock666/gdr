@@ -50,7 +50,7 @@ with st.sidebar:
             cl = st.selectbox('Classe', ['Orrenai', 'Armagister', 'Mago'])
             if st.button('Crea'):
                 if n_pg:
-                    new = pd.DataFrame([{'username': st.session_state.user, 'nome_pg': n_pg, 'razza': rz, 'classe': cl, 'hp': 100, 'ultimo_visto': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}])
+                    new = pd.DataFrame([{'username': st.session_state.user, 'nome_pg': n_pg, 'razza': rz, 'classe': cl, 'hp': 20, 'ultimo_visto': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}])
                     conn.update(worksheet='personaggi', data=pd.concat([df_p, new], ignore_index=True))
                     st.cache_data.clear()
                     st.rerun()
@@ -59,8 +59,9 @@ with st.sidebar:
         st.subheader(f"👤 {pg['nome_pg']}")
         st.caption(f"{pg['razza']} • {pg['classe']}")
         hp_val = int(pg['hp'])
-        st.write(f"❤️ Salute: {hp_val}/100")
-        st.progress(max(0, min(100, hp_val)) / 100)
+        # Calcolo percentuale su base 20
+        st.write(f"❤️ Salute: {hp_val}/20")
+        st.progress(max(0, min(20, hp_val)) / 20)
         
         st.divider()
         st.write("👥 Compagni:")
@@ -72,8 +73,8 @@ with st.sidebar:
                 except:
                     is_online = False
                 
-                status = "🟢 Online" if is_online else "⚪ Offline"
-                st.text(f"{status} | {r['nome_pg']} ({r['hp']} HP)")
+                status = "🟢" if is_online else "⚪"
+                st.text(f"{status} {r['nome_pg']} ({r['hp']}/20 HP)")
 
 st.title('📜 Cronaca dell Abisso')
 for _, r in df_m.tail(15).iterrows():
@@ -88,7 +89,7 @@ if not user_pg_df.empty:
         with st.spinner('Il Master narra...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(4).iterrows()])
-                prompt = f"Contesto: {storia}\nGiocatore {nome_mio} tenta: {act}\nd20: {d20}\nNarra brevemente. Se subisce danni, scrivi DANNI: X alla fine."
+                prompt = f"Contesto: {storia}\nGiocatore {nome_mio} tenta: {act}\nd20: {d20}\nNarra brevemente l esito senza mostrare il dado. Se subisce danni, scrivi DANNI: X alla fine (considera che ha 20 HP totali)."
                 
                 res = client.chat.completions.create(
                     messages=[{"role": "system", "content": "Sei un Master dark fantasy."}, {"role": "user", "content": prompt}],
