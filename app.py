@@ -10,7 +10,7 @@ st.set_page_config(page_title='Apocrypha Master', layout='wide')
 client = OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
 
-st_autorefresh(interval=5000, key='global_refresh')
+st_autorefresh(interval=15000, key='global_refresh')
 
 if 'autenticato' not in st.session_state:
     st.session_state.autenticato = False
@@ -33,11 +33,17 @@ def load_world():
 df_pg, df_chat = load_world()
 
 with st.sidebar:
+    st.title('APOCRYPHA')
     st.header('Anime nell ombra')
     for _, row in df_pg.iterrows():
-        st.write(f'**{row["nome_pg"]}** - {row["razza"]} {row["classe"]} [HP: {row["hp"]}]')
+        with st.container(border=True):
+            st.subheader(f"{row['nome_pg']}")
+            st.caption(f"{row['razza']} {row['classe']}")
+            hp_val = int(row['hp'])
+            st.progress(hp_val / 100, text=f"HP: {hp_val}")
     
     if st.session_state.username not in df_pg['username'].values.astype(str):
+        st.divider()
         st.subheader('Incarna un Eroe')
         n_pg = st.text_input('Nome:')
         r_pg = st.selectbox('Razza:', ['Fenrithar', 'Elling', 'Elpide', 'Minotauro', 'Narun', 'Feyrin', 'Primaris', 'Inferis'])
@@ -53,26 +59,30 @@ st.title('Cronaca dell Abisso')
 for _, row in df_chat.tail(25).iterrows():
     role = 'assistant' if row['autore'] == 'Master' else 'user'
     with st.chat_message(role):
-        st.write(f'**{row["autore"]}**: {row["testo"]}')
+        st.write(f"**{row['autore']}**: {row['testo']}")
 
 if action := st.chat_input('Narra la tua mossa...'):
     pg_row = df_pg[df_pg['username'] == st.session_state.username]
     if not pg_row.empty:
         pg = pg_row.iloc[0]
-        dice_tag = f' [d20: {random.randint(1, 20)}]' if any(t in action.lower() for t in ['provo', 'tento', 'cerco', 'attacco', 'colpisco', 'indago', 'furtivo', 'percepisco', 'ascolto', 'lancio']) else ''
+        dice_tag = f" [d20: {random.randint(1, 20)}]" if any(t in action.lower() for t in ['provo', 'tento', 'cerco', 'attacco', 'colpisco', 'indago', 'furtivo', 'percepisco', 'ascolto', 'lancio']) else ''
         user_msg = f'{action}{dice_tag}'
         new_user_row = pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': pg['nome_pg'], 'testo': user_msg}])
         df_chat_upd = pd.concat([df_chat, new_user_row], ignore_index=True)
+        
         master_prompt = (
-            'Sei il Master di Apocrypha un DM di D&D brutale e descrittivo. '
-            'Genera contesto. Descrivi la puzza di zolfo il riverbero delle torce il rumore di ossa che scricchiolano. '
-            'Se c’è un d20: 1-10 fallimento atroce 11-15 successo risicato 16-19 colpo da maestro 20 leggenda. '
-            'Sii articolato oscuro e crudo. Reagisci ai dettagli del giocatore.'
+            'Sei il Master di Apocrypha, un DM di D&D brutale e descrittivo. '
+            'Narra in modo articolato. Genera contesto crudo. Descrivi la puzza, il riverbero delle torce, il rumore di ossa. '
+            'Se c e un d20: 1-10 fallimento atroce, 11-15 successo risicato, 16-19 colpo da maestro, 20 leggenda. '
+            'Sii articolato, oscuro e crudo. Reagisci ai dettagli del giocatore per espandere il mondo.'
         )
+        
         history = [{'role': 'system', 'content': master_prompt}]
         for _, r in df_chat_upd.tail(15).iterrows():
-            history.append({'role': 'assistant' if r['autore'] == 'Master' else 'user', 'content': f'{r["autore"]}: {r["testo"]}'})
+            history.append({'role': 'assistant' if r['autore'] == 'Master' else 'user', 'content': f"{r['autore']}: {r['testo']}"})
+        
         ai_resp = client.chat.completions.create(model='gpt-4o', messages=history).choices[0].message.content
         df_final = pd.concat([df_chat_upd, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': ai_resp}])], ignore_index=True)
+        
         conn.update(worksheet='messaggi', data=df_final)
         st.rerun()
