@@ -56,12 +56,12 @@ with st.sidebar:
                     st.rerun()
     else:
         pg = user_pg_df.iloc[0]
-        st.subheader(f"👤 {pg['nome_pg']}")
-        st.caption(f"{pg['razza']} • {pg['classe']}")
-        hp_val = int(pg['hp'])
-        # Calcolo percentuale su base 20
-        st.write(f"❤️ Salute: {hp_val}/20")
-        st.progress(max(0, min(20, hp_val)) / 20)
+        with st.container(border=True):
+            st.subheader(f"👤 {pg['nome_pg']}")
+            st.caption(f"{pg['razza']} • {pg['classe']}")
+            hp_val = int(pg['hp'])
+            st.write(f"❤️ Salute: {hp_val}/20")
+            st.progress(max(0, min(20, hp_val)) / 20)
         
         st.divider()
         st.write("👥 Compagni:")
@@ -74,7 +74,10 @@ with st.sidebar:
                     is_online = False
                 
                 status = "🟢" if is_online else "⚪"
-                st.text(f"{status} {r['nome_pg']} ({r['hp']}/20 HP)")
+                with st.container(border=True):
+                    st.markdown(f"**{status} {r['nome_pg']}**")
+                    st.markdown(f"<small>{r['razza']} • {r['classe']}</small>", unsafe_allow_html=True)
+                    st.caption(f"Salute: {r['hp']}/20")
 
 st.title('📜 Cronaca dell Abisso')
 for _, r in df_m.tail(15).iterrows():
@@ -89,14 +92,15 @@ if not user_pg_df.empty:
         with st.spinner('Il Master narra...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(4).iterrows()])
-                prompt = f"Contesto: {storia}\nGiocatore {nome_mio} tenta: {act}\nd20: {d20}\nNarra brevemente l esito senza mostrare il dado. Se subisce danni, scrivi DANNI: X alla fine (considera che ha 20 HP totali)."
+                prompt = f"Contesto: {storia}\nGiocatore {nome_mio} tenta: {act}\nd20: {d20}\nNarra brevemente. Se subisce danni, scrivi DANNI: X alla fine (max 20 HP)."
                 
                 res = client.chat.completions.create(
                     messages=[{"role": "system", "content": "Sei un Master dark fantasy."}, {"role": "user", "content": prompt}],
                     model="llama-3.3-70b-versatile"
-                ).choices[0].message.content
+                )
+                res_txt = res.choices[0].message.content
 
-                dmg = re.search(r"DANNI:\s*(\d+)", res)
+                dmg = re.search(r"DANNI:\s*(\d+)", res_txt)
                 new_hp = int(pg['hp'])
                 if dmg:
                     new_hp = max(0, new_hp - int(dmg.group(1)))
@@ -107,7 +111,7 @@ if not user_pg_df.empty:
 
                 new_m = pd.concat([df_m, pd.DataFrame([
                     {'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act},
-                    {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}
+                    {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res_txt}
                 ])], ignore_index=True)
                 conn.update(worksheet='messaggi', data=new_m)
                 
