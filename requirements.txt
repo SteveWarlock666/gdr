@@ -1,4 +1,4 @@
 google-generativeai
-st-gsheets-connection
+streamlit-gsheets
 streamlit-autorefresh
 pandas
