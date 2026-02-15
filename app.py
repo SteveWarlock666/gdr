@@ -10,23 +10,6 @@ import re
 # Configurazione Pagina
 st.set_page_config(page_title='Apocrypha Chronicles', layout='wide')
 
-# --- CORREZIONE GRAFICA: CSS Renderizzato correttamente ---
-st.markdown("""
-    <style>
-    /* Sfondo e Chat */
-    .stApp { background-color: #0e1117; }
-    .stChatMessage { border: 1px solid #30363d !important; border-radius: 8px !important; background-color: #161b22 !important; }
-    
-    /* Sidebar */
-    section[data-testid="stSidebar"] { background-color: #161b22; border-right: 1px solid #30363d; }
-    
-    /* Titoli e Testi */
-    h1, h2, h3, p { color: #e6edf3 !important; }
-    
-    /* Barra Salute Rossa */
-    .stProgress > div > div > div > div { background-color: #da3633 !important; }
-    </style>
-""", unsafe_allow_html=True)
 
 # Inizializzazione API
 if 'GROQ_API_KEY' not in st.secrets:
