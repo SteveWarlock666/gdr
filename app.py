@@ -14,7 +14,7 @@ if "GEMINI_API_KEY" not in st.secrets:
     st.stop()
 
 genai.configure(api_key=st.secrets['GEMINI_API_KEY'])
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+model = genai.GenerativeModel('gemini-1.5-pro')
 
 conn = st.connection('gsheets', type=GSheetsConnection)
 
@@ -25,7 +25,7 @@ if 'auth' not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    u = st.text_input('Chi osa entrare?')
+    u = st.text_input('Nome reale (per identificarsi)?')
     p = st.text_input('Parola d ordine:', type='password')
     if st.button('Apri il portale'):
         if p == 'apocrypha2026' and u:
