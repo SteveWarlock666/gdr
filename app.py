@@ -3,7 +3,7 @@ from openai import OpenAI
 
 # --- CONFIGURAZIONE ---
 st.set_page_config(page_title="Apocrypha RPG", page_icon="⚔️")
-client = OpenAI(api_key="LA_TUA_CHIAVE_QUI") # Metti la tua chiave tra le virgolette
+client = OpenAI(api_key="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") # Metti la tua chiave tra le virgolette
 PASSWORD_ACCESSO = "apocrypha2026" # Scegli la password per i tuoi amici
 
 # --- LOGIN ---
