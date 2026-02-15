@@ -1,5 +1,1 @@
-google-generativeai>=0.8.3
-google-generativeai
-st-gsheets-connection
-streamlit-autorefresh
-pandas
+google-generativeai>=0.8.3, streamlit-gsheets, streamlit-autorefresh, pandas.
