@@ -18,7 +18,7 @@ if 'auth' not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    u = st.text_input('Chi osa entrare?')
+    u = st.text_input('Nome reale (per identificarsi)')
     p = st.text_input('Parola d ordine:', type='password')
     if st.button('Apri il portale'):
         if p == 'apocrypha2026' and u:
