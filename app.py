@@ -33,7 +33,7 @@ def load_world():
 df_pg, df_chat = load_world()
 
 with st.sidebar:
-    st.header('Ananime nell ombra')
+    st.header('Anime nell ombra')
     for _, row in df_pg.iterrows():
         st.write(f'**{row["nome_pg"]}** - {row["razza"]} {row["classe"]} [HP: {row["hp"]}]')
     
@@ -57,34 +57,22 @@ for _, row in df_chat.tail(25).iterrows():
 
 if action := st.chat_input('Narra la tua mossa...'):
     pg_row = df_pg[df_pg['username'] == st.session_state.username]
-    if pg_row.empty:
-        st.error('Devi prima incarnare un eroe.')
-    else:
+    if not pg_row.empty:
         pg = pg_row.iloc[0]
-        dice_tag = ''
-        triggers = ['provo', 'tento', 'cerco', 'attacco', 'colpisco', 'indago', 'furtivo', 'percepisco', 'ascolto', 'lancio']
-        if any(t in action.lower() for t in triggers):
-            res = random.randint(1, 20)
-            dice_tag = f' [d20: {res}]'
-        
+        dice_tag = f' [d20: {random.randint(1, 20)}]' if any(t in action.lower() for t in ['provo', 'tento', 'cerco', 'attacco', 'colpisco', 'indago', 'furtivo', 'percepisco', 'ascolto', 'lancio']) else ''
         user_msg = f'{action}{dice_tag}'
         new_user_row = pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': pg['nome_pg'], 'testo': user_msg}])
         df_chat_upd = pd.concat([df_chat, new_user_row], ignore_index=True)
-        
         master_prompt = (
-            'Sei il Master di Apocrypha, un DM di D&D brutale e descrittivo. '
-            'Non limitarti a rispondere: genera contesto. Descrivi la puzza di zolfo, il riverbero delle torce, '
-            'il rumore di ossa che scricchiolano. Se c’è un d20: 1-10 fallimento atroce, 11-15 successo risicato, '
-            '16-19 colpo da maestro, 20 leggenda. Sii articolato, oscuro e crudo. Reagisci ai dettagli del giocatore.'
+            'Sei il Master di Apocrypha un DM di D&D brutale e descrittivo. '
+            'Genera contesto. Descrivi la puzza di zolfo il riverbero delle torce il rumore di ossa che scricchiolano. '
+            'Se c’è un d20: 1-10 fallimento atroce 11-15 successo risicato 16-19 colpo da maestro 20 leggenda. '
+            'Sii articolato oscuro e crudo. Reagisci ai dettagli del giocatore.'
         )
-        
         history = [{'role': 'system', 'content': master_prompt}]
         for _, r in df_chat_upd.tail(15).iterrows():
             history.append({'role': 'assistant' if r['autore'] == 'Master' else 'user', 'content': f'{r["autore"]}: {r["testo"]}'})
-        
         ai_resp = client.chat.completions.create(model='gpt-4o', messages=history).choices[0].message.content
-        master_row = pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': ai_resp}])
-        df_final = pd.concat([df_chat_upd, master_row], ignore_index=True)
-        
+        df_final = pd.concat([df_chat_upd, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': ai_resp}])], ignore_index=True)
         conn.update(worksheet='messaggi', data=df_final)
         st.rerun()
