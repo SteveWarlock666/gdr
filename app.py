@@ -5,106 +5,140 @@ from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 from datetime import datetime
 import random
+import re
 
-# Configurazione Dark Mode
+# Configurazione Grafica Dark
 st.set_page_config(page_title='Apocrypha Chronicles', layout='wide')
 
 st.markdown("""
     <style>
-    .hero-card {
-        background-color: #1a1c24;
-        border-radius: 10px;
-        padding: 15px;
-        border: 1px solid #3e4451;
-        margin-bottom: 10px;
-    }
-    .hero-name { color: #ffffff; font-size: 1.2rem; font-weight: bold; margin-bottom: 0px; }
-    .hero-stats { color: #8b949e; font-size: 0.9rem; margin-bottom: 10px; }
+    .main { background-color: #0e1117; }
+    .stChatMessage { border: 1px solid #30363d; border-radius: 8px; background-color: #161b22; }
+    .stSidebar { background-color: #161b22; border-right: 1px solid #30363d; }
+    h1, h2, h3 { color: #e6edf3; }
+    .stProgress > div > div > div > div { background-color: #da3633; }
     </style>
 """, unsafe_allow_html=True)
 
-# Inizializzazione Client Groq
+# Inizializzazione API e Connessione
+if 'GROQ_API_KEY' not in st.secrets:
+    st.error("Inserisci la chiave GROQ_API_KEY nei Secrets di Streamlit!")
+    st.stop()
+
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
 
-# Refresh automatico sincronizzato per il multiplayer
+# Sincronizzazione Multiplayer (aggiorna ogni 15 secondi)
 st_autorefresh(interval=15000, key='multiplayer_sync')
 
 if 'auth' not in st.session_state:
     st.session_state.auth = False
 
+# --- FASE 1: LOGIN ---
 if not st.session_state.auth:
-    st.title('🌑 APOCRYPHA')
-    u = st.text_input('Chi sei?')
-    p = st.text_input('Password:', type='password')
-    if st.button('Entra nell Abisso'):
-        if p == 'apocrypha2026' and u:
-            st.session_state.auth = True
-            st.session_state.user = u
-            st.rerun()
+    st.title('🌑 BENVENUTO IN APOCRYPHA')
+    col1, col2 = st.columns(2)
+    with col1:
+        u = st.text_input('Username')
+        p = st.text_input('Password', type='password')
+        if st.button('Entra nell Abisso'):
+            if p == 'apocrypha2026' and u:
+                st.session_state.auth = True
+                st.session_state.user = u
+                st.rerun()
     st.stop()
 
-# Caricamento Dati
+# --- FASE 2: CARICAMENTO DATI ---
 df_p = conn.read(worksheet='personaggi', ttl=0)
 df_m = conn.read(worksheet='messaggi', ttl=0)
 
-# SIDEBAR GRAFICA
+# Controllo se l'utente ha un personaggio
+user_data = df_p[df_p['username'] == st.session_state.user]
+
+# --- SIDEBAR: SCHEDA PERSONAGGIO ---
 with st.sidebar:
-    st.title('🛡️ STATO EROI')
-    for _, r in df_p.iterrows():
-        hp = int(r['hp'])
-        st.markdown(f"""
-            <div class="hero-card">
-                <div class="hero-name">{r['nome_pg']}</div>
-                <div class="hero-stats">{r['razza']} • {r['classe']}</div>
-            </div>
-        """, unsafe_allow_html=True)
-        st.progress(max(0, min(100, hp)) / 100, text=f"HP: {hp}/100")
+    st.title('🛡️ IL TUO EROE')
     
-    if st.session_state.user not in df_p['username'].values.astype(str):
-        with st.expander("✨ Nuovo Viandante"):
-            n = st.text_input('Nome Eroe')
-            rz = st.selectbox('Razza', ['Fenrithar', 'Elling', 'Elpide', 'Minotauro', 'Narun', 'Feyrin', 'Primaris', 'Inferis'])
-            cl = st.selectbox('Classe', ['Orrenai', 'Armagister', 'Mago'])
-            if st.button('Inizia Viaggio'):
-                if n:
-                    new = pd.DataFrame([{'username': st.session_state.user, 'nome_pg': n, 'razza': rz, 'classe': cl, 'hp': 100}])
-                    conn.update(worksheet='personaggi', data=pd.concat([df_p, new], ignore_index=True))
+    if user_data.empty:
+        st.warning("Non hai ancora un personaggio!")
+        with st.expander("✨ Crea Eroe"):
+            nome = st.text_input('Nome PG')
+            razza = st.selectbox('Razza', ['Fenrithar', 'Elling', 'Elpide', 'Minotauro', 'Narun', 'Feyrin', 'Primaris', 'Inferis'])
+            classe = st.selectbox('Classe', ['Orrenai', 'Armagister', 'Mago'])
+            if st.button('Risvegliati'):
+                if nome:
+                    new_pg = pd.DataFrame([{
+                        'username': st.session_state.user, 
+                        'nome_pg': nome, 
+                        'razza': razza, 
+                        'classe': classe, 
+                        'hp': 100
+                    }])
+                    conn.update(worksheet='personaggi', data=pd.concat([df_p, new_pg], ignore_index=True))
                     st.rerun()
+    else:
+        pg = user_data.iloc[0]
+        st.subheader(f"👤 {pg['nome_pg']}")
+        st.caption(f"{pg['razza']} • {pg['classe']}")
+        
+        hp_attuali = int(pg['hp'])
+        st.write(f"❤️ Salute: {hp_attuali}/100")
+        st.progress(max(0, min(100, hp_attuali)) / 100)
+        
+        st.divider()
+        st.markdown("**Compagni Online:**")
+        altri_pg = df_p[df_p['username'] != st.session_state.user]
+        for _, r in altri_pg.iterrows():
+            st.caption(f"🔸 {r['nome_pg']} ({r['hp']} HP)")
 
-# CRONACA MULTIPLAYER
+# --- AREA GIOCO: CRONACA ---
 st.title('📜 Cronaca dell Abisso')
-for _, r in df_m.tail(20).iterrows():
-    is_master = r['autore'] == 'Master'
-    with st.chat_message("assistant" if is_master else "user"):
-        st.markdown(f"**{r['autore']}** <small style='color:gray'>{r['data']}</small>", unsafe_allow_html=True)
-        st.write(r['testo'])
 
-# AZIONE
-if act := st.chat_input('Scrivi la tua mossa...'):
-    pg_n = df_p[df_p['username'] == st.session_state.user].iloc[0]['nome_pg']
-    azione_finale = f"{act} [d20: {random.randint(1, 20)}]"
-    
-    with st.spinner('Il Master osserva...'):
-        try:
-            # Memoria storica per coerenza multiplayer
-            storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(4).iterrows()])
-            
-            completion = client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": "Sei il Master di un GDR dark fantasy. Rispondi alle azioni dei giocatori in modo brutale e sintetico (max 3 frasi)."},
-                    {"role": "user", "content": f"Storia recente:\n{storia}\n\nOra {pg_n} fa: {azione_finale}"}
-                ],
-                model="llama-3.3-70b-versatile",
-            )
-            master_res = completion.choices[0].message.content
-            
-            nuovi_msg = pd.DataFrame([
-                {'data': datetime.now().strftime('%H:%M'), 'autore': pg_n, 'testo': azione_finale},
-                {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': master_res}
-            ])
-            conn.update(worksheet='messaggi', data=pd.concat([df_m, nuovi_msg], ignore_index=True))
-            st.cache_data.clear()
-            st.rerun()
-        except Exception as e:
-            st.error(f"Errore: {e}")
+# Mostra gli ultimi 15 messaggi per non intasare
+for _, r in df_m.tail(15).iterrows():
+    role = 'assistant' if r['autore'] == 'Master' else 'user'
+    with st.chat_message(role):
+        st.markdown(f"**{r['autore']}**: {r['testo']}")
+
+# --- INPUT AZIONE ---
+if not user_data.empty:
+    if act := st.chat_input('Cosa fai?'):
+        pg_n = user_data.iloc[0]['nome_pg']
+        hp_n = int(user_data.iloc[0]['hp'])
+        d20 = random.randint(1, 20)
+        azione_utente = f"{act} [d20: {d20}]"
+        
+        with st.spinner('Il Master narra...'):
+            try:
+                # Memoria Multiplayer: legge gli ultimi messaggi per coerenza
+                storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
+                
+                prompt = f"Sei il Master di Apocrypha. Narra l'esito: {pg_n} fa {azione_utente}. Sii breve. Se subisce danni scrivi 'DANNI: X' alla fine."
+                
+                chat = client.chat.completions.create(
+                    messages=[
+                        {"role": "system", "content": "GDR Dark Fantasy spietato."},
+                        {"role": "user", "content": f"Storia recente:\n{storia}\n\nAzione attuale: {azione_utente}"}
+                    ],
+                    model="llama-3.3-70b-versatile",
+                )
+                res_master = chat.choices[0].message.content
+
+                # Calcolo Danni Automatico
+                dmg_match = re.search(r"DANNI:\s*(\d+)", res_master)
+                if dmg_match:
+                    danno = int(dmg_match.group(1))
+                    df_p.loc[df_p['username'] == st.session_state.user, 'hp'] = max(0, hp_n - danno)
+                    conn.update(worksheet='personaggi', data=df_p)
+
+                # Aggiornamento Cronaca
+                nuovi_msg = pd.DataFrame([
+                    {'data': datetime.now().strftime('%H:%M'), 'autore': pg_n, 'testo': azione_utente},
+                    {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res_master}
+                ])
+                conn.update(worksheet='messaggi', data=pd.concat([df_m, nuovi_msg], ignore_index=True))
+                
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Errore: {e}")
