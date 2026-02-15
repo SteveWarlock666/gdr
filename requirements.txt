@@ -1,1 +1,4 @@
-google-generativeai>=0.8.3, streamlit-gsheets, streamlit-autorefresh, pandas.
+google-generativeai
+streamlit-gsheets
+streamlit-autorefresh
+pandas
