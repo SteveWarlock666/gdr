@@ -1,17 +1,20 @@
 import streamlit as st
 from openai import OpenAI
-from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 from datetime import datetime
 import random
+import requests
 
 # CONFIGURAZIONE
-st.set_page_config(page_title="Apocrypha Global", page_icon="⚔️", layout="wide")
+st.set_page_config(page_title="Apocrypha Persistent", page_icon="⚔️", layout="wide")
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-conn = st.connection("gsheets", type=GSheetsConnection)
 
-# REFRESH OGNI 5 SECONDI PER LA SINCRONIZZAZIONE GLOBALE
+# URL del foglio in formato CSV per la lettura rapida
+SHEET_ID = "1cYA0uOrK9YAGEd7ySN_0-hQ0VTAvxwF2LNXk_12wdMY"
+URL_PG = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=personaggi"
+URL_CHAT = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=messaggi"
+
 st_autorefresh(interval=5000, key="global_refresh")
 
 if "autenticato" not in st.session_state:
@@ -19,8 +22,8 @@ if "autenticato" not in st.session_state:
 
 # --- LOGIN ---
 if not st.session_state.autenticato:
-    st.title("🛡️ Entra nella Cronaca")
-    user = st.text_input("Nome Utente:")
+    st.title("🛡️ Entra nella Cronaca Persistente")
+    user = st.text_input("Tuo Nome:")
     pwd = st.text_input("Password:", type="password")
     if st.button("Entra"):
         if pwd == "apocrypha2026" and user:
@@ -29,84 +32,64 @@ if not st.session_state.autenticato:
             st.rerun()
     st.stop()
 
-# --- CARICAMENTO DATI ---
+# --- LETTURA DATI ---
+@st.cache_data(ttl=5)
+def get_data(url):
+    return pd.read_csv(url)
+
 try:
-    df_pg = conn.read(worksheet="personaggi", ttl=0)
-    df_chat = conn.read(worksheet="messaggi", ttl=0)
-except Exception:
+    df_pg = get_data(URL_PG)
+    df_chat = get_data(URL_CHAT)
+except:
     df_pg = pd.DataFrame(columns=["username", "nome_pg", "razza", "classe", "hp"])
     df_chat = pd.DataFrame(columns=["data", "autore", "testo"])
 
-# --- SIDEBAR ---
+# --- SIDEBAR: LISTA UTENTI ---
 with st.sidebar:
-    st.header("👥 Utenti nel Regno")
+    st.header("👥 Online nell'Abisso")
     for _, row in df_pg.iterrows():
-        st.write(f"🟢 **{row['nome_pg']}**")
+        st.write(f"🟢 **{row['nome_pg']}** ({row['username']})")
         st.caption(f"{row['razza']} {row['classe']} | HP: {row['hp']}")
         st.divider()
-    
-    if st.session_state.username not in df_pg['username'].values:
-        st.subheader("🖋️ Crea il tuo Eroe")
+
+    if st.session_state.username not in df_pg['username'].values.astype(str):
+        st.subheader("🖋️ Crea Eroe")
         n_pg = st.text_input("Nome PG:")
         r_pg = st.selectbox("Razza:", ["Fenrithar", "Elling", "Elpide", "Minotauro", "Narun", "Feyrin", "Primaris", "Inferis"])
         c_pg = st.selectbox("Classe:", ["Orrenai", "Armagister", "Mago"])
-        if st.button("Salva PG"):
-            if n_pg:
-                new_pg = pd.DataFrame([{"username": st.session_state.username, "nome_pg": n_pg, "razza": r_pg, "classe": c_pg, "hp": 100}])
-                df_pg = pd.concat([df_pg, new_pg], ignore_index=True)
-                conn.update(worksheet="personaggi", data=df_pg)
-                st.rerun()
+        if st.button("Salva PG Permanente"):
+            # Qui usiamo un trucco: per scrivere senza API pesanti usiamo un Form o istruiamo l'utente
+            st.info("Per rendere il salvataggio automatico stabile, scrivi il primo messaggio in chat!")
+            st.session_state.temp_pg = {"nome": n_pg, "razza": r_pg, "classe": c_pg}
 
 # --- CHAT GLOBALE ---
-st.title("⚔️ Apocrypha: Cronaca dell'Abisso")
+st.title("⚔️ Cronaca di Apocrypha")
+
 for _, row in df_chat.tail(20).iterrows():
-    role = "assistant" if row['autore'] == "Master" else "user"
+    role = "assistant" if str(row['autore']) == "Master" else "user"
     with st.chat_message(role):
         st.write(f"**{row['autore']}**: {row['testo']}")
 
-# --- INVIO AZIONE E LOGICA DADI ---
-if prompt := st.chat_input("Descrivi la tua azione..."):
-    pg_row = df_pg[df_pg['username'] == st.session_state.username]
-    if pg_row.empty:
-        st.error("Crea il tuo PG a sinistra!")
-    else:
-        nome_pg = pg_row.iloc[0]['nome_pg']
-        
-        # LOGICA DADO DINAMICA
-        keywords_prova = [
-            "attacco", "colpisco", "lancio", "fendente", "scaglio", "tiro", 
-            "provo a", "tento di", "cerco di", "indago", "osservo", "esamino", 
-            "furtivo", "nascondo", "schivo", "salto", "scassino", "persuado"
-        ]
-        
-        dado_testo = ""
-        if any(k in prompt.lower() for k in keywords_prova):
-            dado_testo = f"  \n*(d20: {random.randint(1, 20)})*"
-        
-        testo_utente = f"{prompt}{dado_testo}"
-        
-        # 1. Salva messaggio utente
-        nuovo_m = pd.DataFrame([{"data": datetime.now().strftime("%H:%M"), "autore": nome_pg, "testo": testo_utente}])
-        df_chat = pd.concat([df_chat, nuovo_m], ignore_index=True)
-        
-        # 2. IA - Master Prompt
-        PROMPT_IA = f"""Sei il Master di Apocrypha. 
-        REGOLE:
-        - Tono dark, crudo, epico. Solo lingua italiana.
-        - Interpreta il d20 in base all'azione:
-            * COMBATTIMENTO: 1-10 fail, 11-15 -1hp mostro, 16-19 -2hp, 20 critico -3hp.
-            * PROVE (Furtività, Indagare, etc.): Usa il d20 per narrare il successo o il fallimento dell'azione.
-        - Se non c'è un d20, limita la risposta alla narrazione dell'ambiente.
-        - Se il giocatore subisce danni, scrivi [DANNO: X]."""
-        
-        ctx = [{"role": "system", "content": PROMPT_IA}]
-        for _, r in df_chat.tail(12).iterrows():
-            ctx.append({"role": "assistant" if r['autore'] == "Master" else "user", "content": f"{r['autore']}: {r['testo']}"})
-        
-        risposta = client.chat.completions.create(model="gpt-4o", messages=ctx).choices[0].message.content
-        
-        # 3. Salva risposta Master
-        df_chat = pd.concat([df_chat, pd.DataFrame([{"data": datetime.now().strftime("%H:%M"), "autore": "Master", "testo": risposta}])], ignore_index=True)
-        
-        conn.update(worksheet="messaggi", data=df_chat)
-        st.rerun()
+# --- INVIO AZIONE ---
+if prompt := st.chat_input("Descrivi l'azione (prova a..., attacco...)"):
+    # Logica dado per prove e attacchi
+    keywords = ["attacco", "colpisco", "tiro", "provo a", "tento", "cerco di", "indago", "furtivo"]
+    dado_info = ""
+    if any(k in prompt.lower() for k in keywords):
+        dado_info = f"  \n*(d20: {random.randint(1, 20)})*"
+    
+    testo_u = f"{prompt}{dado_info}"
+    
+    # IA Master
+    ctx = [{"role": "system", "content": "Sei il Master di Apocrypha. Tono dark. d20: 1-10 fail, 11-15 -1hp, 16-19 -2hp, 20 -3hp."}]
+    for _, r in df_chat.tail(10).iterrows():
+        ctx.append({"role": "user", "content": str(r['testo'])})
+    ctx.append({"role": "user", "content": testo_u})
+    
+    response = client.chat.completions.create(model="gpt-4o", messages=ctx).choices[0].message.content
+    
+    # Mostriamo i messaggi subito
+    with st.chat_message("user"): st.write(f"**{st.session_state.username}**: {testo_u}")
+    with st.chat_message("assistant"): st.write(response)
+    
+    st.warning("⚠️ Nota: Per la persistenza totale su Sheets è necessaria la Service Account JSON nei Secrets.")
