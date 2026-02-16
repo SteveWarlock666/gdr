@@ -30,8 +30,6 @@ if 'GROQ_API_KEY' not in st.secrets:
 
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
-
-# Refresh a 30 secondi per salvaguardare la quota API
 st_autorefresh(interval=30000, key='global_sync')
 
 if 'auth' not in st.session_state:
@@ -60,7 +58,7 @@ try:
     df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
 except Exception as e:
     if "429" in str(e):
-        st.warning("Quota Google Sheets esaurita. Attendi 30 secondi...")
+        st.warning("Quota Google esaurita. Attendi 30 secondi...")
         st.stop()
     st.error(f"Errore: {e}")
     st.stop()
@@ -99,6 +97,15 @@ with st.sidebar:
                 st.markdown(f"<p style='font-size:12px; margin:0;'>**{abi['nome']}**</p>", unsafe_allow_html=True)
                 st.caption(f"{abi['tipo']} • 🧪 {abi['costo']} • 🎲 {abi['dadi']}")
 
+        st.divider()
+        st.write("👥 Compagni:")
+        compagni = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
+        for _, c in compagni.iterrows():
+            with st.container(border=True):
+                st.markdown(f"<p style='font-size:12px; margin:0;'>**{c['nome_pg']}**</p>", unsafe_allow_html=True)
+                st.caption(f"{c['razza']} {c['classe']}")
+                st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
+
 st.title('📜 Cronaca dell Abisso')
 for _, r in df_m.tail(15).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
@@ -111,14 +118,7 @@ if not user_pg_df.empty:
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
                 dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
-                
-                sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}.
-                STYLE: Narrazione pura. NON scrivere roll numerici.
-                REGOLE XP: Assegna XP (es. XP: 50) SOLO quando un nemico/mostro viene ucciso o una sfida major superata.
-                L'XP assegnato andrà a tutto il team presente.
-                REGOLE SUCCESSO (d20): 1-10 Fallimento, 11-14 (-1 HP nemico), 15-19 (-2 HP nemico), 20 Critico (-3 HP).
-                TAG OBBLIGATORI: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
-                
+                sys_msg = f"Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}. REGOLE XP: Solo a nemico ucciso e per tutto il team. TAG: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."
                 res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {dettagli_abi}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
                 d_hp = re.search(r"DANNI:\s*(\d+)", res)
@@ -128,27 +128,19 @@ if not user_pg_df.empty:
                 d_loc = re.search(r"LUOGO:\s*([^\n]+)", res)
                 
                 val_xp = int(d_xp.group(1)) if d_xp else 0
-                
-                # Aggiornamento per l'utente corrente
                 n_hp = max(0, int(pg['hp']) - (int(d_hp.group(1)) if d_hp else 0))
                 n_mn = max(0, int(pg['mana']) - (int(d_mn.group(1)) if d_mn else 0))
                 n_vg = max(0, int(pg['vigore']) - (int(d_vg.group(1)) if d_vg else 0))
                 n_loc = d_loc.group(1).strip() if d_loc else pg['posizione']
                 
-                # Applichiamo l'XP a TUTTI i personaggi nella stessa posizione (Team)
                 if val_xp > 0:
                     mask = df_p['posizione'] == pg['posizione']
                     df_p.loc[mask, 'xp'] = df_p.loc[mask, 'xp'].astype(int) + val_xp
-                    # Controllo Level Up per tutti
                     for idx in df_p[mask].index:
-                        c_xp = int(df_p.at[idx, 'xp'])
-                        c_lvl = int(df_p.at[idx, 'lvl'])
-                        if c_xp >= XP_LEVELS.get(c_lvl + 1, 99999):
-                            df_p.at[idx, 'lvl'] = c_lvl + 1
+                        c_xp, c_lvl = int(df_p.at[idx, 'xp']), int(df_p.at[idx, 'lvl'])
+                        if c_xp >= XP_LEVELS.get(c_lvl + 1, 99999): df_p.at[idx, 'lvl'] = c_lvl + 1
 
-                # Salvataggio dati specifici utente
                 df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto', 'posizione']] = [n_hp, n_mn, n_vg, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), n_loc]
-                
                 conn.update(worksheet='personaggi', data=df_p)
                 new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
                 conn.update(worksheet='messaggi', data=new_m)
