@@ -19,11 +19,11 @@ st.markdown("""
     .compact-row {
         display: flex;
         align-items: center;
-        gap: 10px;
+        gap: 8px;
         margin-bottom: 4px;
     }
     .compact-label {
-        font-size: 12px !important;
+        font-size: 8px !important;
         min-width: 75px;
         margin: 0 !important;
         white-space: nowrap;
