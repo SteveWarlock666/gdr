@@ -102,41 +102,38 @@ for _, r in df_m.tail(15).iterrows():
 if not user_pg_df.empty:
     if act := st.chat_input('Cosa fai?'):
         nome_mio = pg['nome_pg']
-        with st.spinner('Il Master lancia i dadi...'):
+        with st.spinner('Il Master narra...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
-                dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi Narrativi: {a['dadi']})" for _, a in mie_abi.iterrows()])
+                dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
                 
-                sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Abilità di {nome_mio}: {dettagli_abi}.
-                REGOLE SUCCESSO (Usa d20):
-                - 1-10: Fallimento.
-                - 11-14: Successo lieve (-1 HP nemico).
-                - 15-19: Successo solido (-2 HP nemico).
-                - 20: Critico (-3 HP nemico).
+                sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}.
+                STILE: Narrazione pura. NON scrivere mai i risultati numerici dei dadi (es. "hai tirato 15").
                 
-                REGOLE NARRATIVE (Usa i Dadi Narrativi dell'abilità):
-                - Se il d20 dà successo, descrivi l'entità dell'effetto in base al dado dell'abilità (es. un d12 è più spettacolare di un d4).
+                LOGICA INTERNA (Applica ma non citare):
+                - d20 per successo: 1-10 Fallimento, 11-14 (-1 HP nemico), 15-19 (-2 HP nemico), 20 Critico (-3 HP).
+                - Dadi Abilità: Se l'azione ha successo, usa il tipo di dado (d4, d12, etc.) per decidere quanto descrivere l'effetto come epico o brutale.
                 
-                IMPORTANTE:
-                - Sottrai HP a {nome_mio} SOLO se subisce un attacco nemico o fa 1 naturale.
-                - Sottrai sempre il costo in MANA o VIGORE.
-                - Tag obbligatori: DANNI: X (per {nome_mio}), MANA_USATO: X, VIGORE_USATO: X, XP: X."""
+                TAG OBBLIGATORI (Da mettere solo alla fine del messaggio per il sistema):
+                DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome (se cambia)."""
                 
-                res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nGiocatore {nome_mio}: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
+                res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità disponibili: {dettagli_abi}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
                 d_hp = re.search(r"DANNI:\s*(\d+)", res)
                 d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
                 d_vg = re.search(r"VIGORE_USATO:\s*(\d+)", res)
                 d_xp = re.search(r"XP:\s*(\d+)", res)
+                d_loc = re.search(r"LUOGO:\s*([^\n]+)", res)
                 
                 n_hp = max(0, int(pg['hp']) - (int(d_hp.group(1)) if d_hp else 0))
                 n_mn = max(0, int(pg['mana']) - (int(d_mn.group(1)) if d_mn else 0))
                 n_vg = max(0, int(pg['vigore']) - (int(d_vg.group(1)) if d_vg else 0))
                 n_xp = int(pg['xp']) + (int(d_xp.group(1)) if d_xp else 0)
+                n_loc = d_loc.group(1).strip() if d_loc else pg['posizione']
                 n_lvl = int(pg['lvl'])
                 if n_xp >= XP_LEVELS.get(n_lvl + 1, 99999): n_lvl += 1
 
-                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto']] = [n_hp, n_mn, n_vg, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']] = [n_hp, n_mn, n_vg, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), n_loc]
                 conn.update(worksheet='personaggi', data=df_p)
                 new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
                 conn.update(worksheet='messaggi', data=new_m)
