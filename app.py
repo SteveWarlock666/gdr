@@ -190,7 +190,6 @@ if act := st.chat_input('Cosa fai?'):
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            # PROMPT CORRETTO CON REGOLE DI COERENZA
             sys_msg = f"""Sei il Master. Giocatore Attuale: {nome_pg}.
             
             [STATUS PARTY]
@@ -198,7 +197,7 @@ if act := st.chat_input('Cosa fai?'):
             GIOCATORI OFFLINE (Ignorali): {str_offline}
             
             [REGOLE GESTIONE NPC]
-            1. COERENZA: Non far sparire gli NPC nel nulla. Se il giocatore si allontana, descrivi la reazione dell'NPC (es. rimane lì a guardare, se ne va offeso, saluta).
+            1. COERENZA: Non far sparire gli NPC nel nulla. Se il giocatore si allontana, descrivi la reazione dell'NPC.
             2. PERMANENZA: Gli oggetti e le persone non spariscono appena si cambia paragrafo.
             
             [REGOLE GESTIONE GIOCATORI]
@@ -216,7 +215,7 @@ if act := st.chat_input('Cosa fai?'):
             3. XP: Assegna solo se nemico muore.
             4. NO CALCOLI nel testo.
             
-            TAG OUTPUT:
+            TAG OUTPUT (Da usare per i calcoli, NON verranno mostrati al giocatore):
             DANNI_NEMICO: X
             DANNI_RICEVUTI: X
             MANA_USATO: X
@@ -263,7 +262,13 @@ if act := st.chat_input('Cosa fai?'):
                 df_p.loc[mask_gruppo, 'xp'] += xp_confermato
             
             conn.update(worksheet='personaggi', data=df_p)
-            new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_pg, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
+            
+            # --- PULIZIA OUTPUT (Novità: rimuove i tag prima di salvare) ---
+            testo_pulito = re.sub(r'TAG OUTPUT:[\s\S]*', '', res).strip()
+            # Pulizia extra per sicurezza se il modello dimentica l'header
+            testo_pulito = re.sub(r'(DANNI_NEMICO|DANNI_RICEVUTI|MANA_USATO|VIGORE_USATO|XP|NOME_NEMICO|LUOGO):\s*.*', '', testo_pulito).strip()
+            
+            new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_pg, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': testo_pulito}])], ignore_index=True)
             conn.update(worksheet='messaggi', data=new_m)
             
             st.cache_data.clear()
