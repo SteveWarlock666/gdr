@@ -8,6 +8,7 @@ import re
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
+# CSS per barre sottili e colori
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
@@ -46,16 +47,18 @@ if not st.session_state.auth:
 
 XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
+# Caricamento dati ottimizzato per evitare blocchi
 try:
-    df_p = conn.read(worksheet='personaggi', ttl=0)
+    df_p = conn.read(worksheet='personaggi', ttl="0s") # Forza lettura istantanea
     for col in ['mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns:
             df_p[col] = 0 if col != 'posizione' else 'Skyheaven - Strada per Gauvadon'
     df_p = df_p.fillna(0)
-    df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
-    df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
+    
+    df_m = conn.read(worksheet='messaggi', ttl="0s").fillna('')
+    df_a = conn.read(worksheet='abilita', ttl="0s").fillna('')
 except Exception as e:
-    st.error(f"Errore caricamento: {e}")
+    st.error(f"Connessione lenta... riprova tra un istante. Dettaglio: {e}")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
