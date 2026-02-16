@@ -102,7 +102,7 @@ attivi = []
 offline = []
 for _, row in df_p.iterrows():
     if str(row['username']) == str(st.session_state.user):
-        continue # Saltiamo noi stessi, siamo il Giocatore Attuale
+        continue # Saltiamo noi stessi
     try:
         last_seen = datetime.strptime(str(row['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
         if datetime.now() - last_seen < timedelta(minutes=10):
@@ -190,23 +190,23 @@ if act := st.chat_input('Cosa fai?'):
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            # PROMPT AGGIORNATO CON GESTIONE OFFLINE
+            # PROMPT AGGIORNATO: LOBOTOMIA SELETTIVA PER OFFLINE
             sys_msg = f"""Sei il Master. Giocatore Attuale: {nome_pg}.
             
             [STATUS PARTY]
-            ALTRI GIOCATORI ATTIVI (Aspetta la loro risposta): {str_attivi}
-            GIOCATORI OFFLINE (Presenti ma passivi): {str_offline}
+            ALTRI GIOCATORI ATTIVI (Attendi la loro mossa): {str_attivi}
+            GIOCATORI OFFLINE (Ignorali): {str_offline}
             
             [REGOLE GESTIONE GIOCATORI]
-            1. ATTIVI: Non descrivere MAI le loro azioni/dialoghi. Se {nome_pg} parla con loro, fermati e aspetta che rispondano.
-            2. OFFLINE (es. Kaeryn): Sono fisicamente presenti nel gruppo e seguono {nome_pg}, ma sono SILENZIOSI.
-               - NON farli parlare.
-               - NON farli prendere iniziative.
-               - Descrivili solo come "che seguono il gruppo" o "osservano".
-               - NON farli sparire nel nulla.
+            1. ATTIVI: Non descrivere MAI le loro azioni. Se interagisci con loro, fermati.
+            2. OFFLINE ({str_offline}): Sono presenti ma sono "Zavorra".
+               - NON nominarli in ogni singolo messaggio.
+               - NON descrivere le loro facce o sguardi.
+               - Usa termini generici come "il gruppo" o "gli altri".
+               - Nominali SOLO se strettamente necessario per la trama.
             
             [INFO NEMICI]
-            {nem_info}
+            {nemici_presenti}
             
             REGOLE MECCANICHE:
             1. Attacco: d20 (11-14=1, 15-19=2, 20=3). Abilità: d20 + 1d4.
