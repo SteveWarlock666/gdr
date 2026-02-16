@@ -190,20 +190,22 @@ if act := st.chat_input('Cosa fai?'):
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            # PROMPT AGGIORNATO: LOBOTOMIA SELETTIVA PER OFFLINE
+            # PROMPT CORRETTO CON REGOLE DI COERENZA
             sys_msg = f"""Sei il Master. Giocatore Attuale: {nome_pg}.
             
             [STATUS PARTY]
-            ALTRI GIOCATORI ATTIVI (Attendi la loro mossa): {str_attivi}
+            ALTRI GIOCATORI ATTIVI (Aspetta la loro risposta): {str_attivi}
             GIOCATORI OFFLINE (Ignorali): {str_offline}
             
+            [REGOLE GESTIONE NPC]
+            1. COERENZA: Non far sparire gli NPC nel nulla. Se il giocatore si allontana, descrivi la reazione dell'NPC (es. rimane lì a guardare, se ne va offeso, saluta).
+            2. PERMANENZA: Gli oggetti e le persone non spariscono appena si cambia paragrafo.
+            
             [REGOLE GESTIONE GIOCATORI]
-            1. ATTIVI: Non descrivere MAI le loro azioni. Se interagisci con loro, fermati.
-            2. OFFLINE ({str_offline}): Sono presenti ma sono "Zavorra".
-               - NON nominarli in ogni singolo messaggio.
-               - NON descrivere le loro facce o sguardi.
-               - Usa termini generici come "il gruppo" o "gli altri".
-               - Nominali SOLO se strettamente necessario per la trama.
+            1. ATTIVI: Non descrivere MAI le loro azioni.
+            2. OFFLINE ({str_offline}): Sono presenti ma passivi. 
+               - NON nominarli continuamente.
+               - NON descrivere cosa fanno/pensano.
             
             [INFO NEMICI]
             {nemici_presenti}
