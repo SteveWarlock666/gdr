@@ -102,7 +102,7 @@ with st.sidebar:
         compagni = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
         for _, c in compagni.iterrows():
             with st.container(border=True):
-                st.markdown(f"<p style='font-size:12px; margin:0;'>**{c['nome_pg']}**</p>", unsafe_allow_html=True)
+                st.markdown(f"**{c['nome_pg']}**")
                 st.caption(f"{c['razza']} {c['classe']}")
                 st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
