@@ -34,9 +34,9 @@ st.markdown("""
     
     /* Forzatura Colori */
     #hp-bar .stProgress div[role="progressbar"] > div { background-color: #ff4b4b !important; }
-    #mana-bar .stProgress div[role="progressbar"] > div { background-color: #00f2ff; }
-    #stamina-bar .stProgress div[role="progressbar"] > div { background-color: #00ff88; }
-    #xp-bar .stProgress div[role="progressbar"] > div { background-color: #ffffff; }
+    #mana-bar .stProgress div[role="progressbar"] > div { background-color: #00f2ff !important; }
+    #stamina-bar .stProgress div[role="progressbar"] > div { background-color: #00ff88 !important; }
+    #xp-bar .stProgress div[role="progressbar"] > div { background-color: #ffffff !important; }
 
     /* Rimuove spazi tra gli elementi di Streamlit */
     div[data-testid="stVerticalBlock"] > div { padding-bottom: 0px !important; margin-bottom: 0px !important; }
