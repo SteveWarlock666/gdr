@@ -23,7 +23,7 @@ st.markdown("""
         margin-bottom: 4px;
     }
     .compact-label {
-        font-size: 8px !important;
+        font-size: 12px !important;
         min-width: 75px;
         margin: 0 !important;
         white-space: nowrap;
