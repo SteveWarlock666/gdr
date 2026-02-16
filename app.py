@@ -49,17 +49,26 @@ if not st.session_state.auth:
 XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
 try:
+    # Forza la lettura delle colonne corrette
     df_p = conn.read(worksheet='personaggi', ttl=0)
+    
+    # Se il foglio è vuoto o manca la colonna username, la inizializziamo
+    if 'username' not in df_p.columns:
+        st.error("La colonna 'username' non è stata trovata nel foglio 'personaggi'. Controlla l'intestazione dello Sheet.")
+        st.stop()
+
     for col in ['mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns:
             df_p[col] = 0 if col != 'posizione' else 'Skyheaven - Strada per Gauvadon'
+    
     df_p = df_p.fillna(0)
     df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
 except Exception as e:
-    st.error(f"Errore: {e}")
+    st.error(f"Errore caricamento dati: {e}")
     st.stop()
 
+# Filtro utente sicuro
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
 
 with st.sidebar:
@@ -71,15 +80,19 @@ with st.sidebar:
             st.markdown(f"**{nome_pg} (Lv. {int(pg['lvl'])})**")
             st.caption(f"📍 {pg['posizione']}")
             st.caption(f"{pg['razza']} • {pg['classe']}")
+            
             st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">❤️ HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
+            
             st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">✨ MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['mana']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
+            
             st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">⚡ VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['vigore']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
+            
             st.divider()
             cur_lvl, cur_xp = int(pg['lvl']), int(pg['xp'])
             next_xp = XP_LEVELS.get(cur_lvl + 1, 99999)
@@ -108,16 +121,11 @@ if not user_pg_df.empty:
                 dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
                 
                 sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}.
-                STILE: Narrazione pura. NON scrivere mai i risultati numerici dei dadi (es. "hai tirato 15").
+                STILE: Narrazione pura. NON scrivere mai i risultati numerici dei dadi.
+                LOGICA: d20 per successo: 1-10 Fallimento, 11-14 (-1 HP nemico), 15-19 (-2 HP nemico), 20 Critico (-3 HP).
+                TAG OBBLIGATORI: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome (se cambia)."""
                 
-                LOGICA INTERNA (Applica ma non citare):
-                - d20 per successo: 1-10 Fallimento, 11-14 (-1 HP nemico), 15-19 (-2 HP nemico), 20 Critico (-3 HP).
-                - Dadi Abilità: Se l'azione ha successo, usa il tipo di dado (d4, d12, etc.) per decidere quanto descrivere l'effetto come epico o brutale.
-                
-                TAG OBBLIGATORI (Da mettere solo alla fine del messaggio per il sistema):
-                DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome (se cambia)."""
-                
-                res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità disponibili: {dettagli_abi}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
+                res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {dettagli_abi}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
                 d_hp = re.search(r"DANNI:\s*(\d+)", res)
                 d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
@@ -140,4 +148,4 @@ if not user_pg_df.empty:
                 st.cache_data.clear()
                 st.rerun()
             except Exception as e:
-                st.error(f"Errore: {e}")
+                st.error(f"Errore durante l'azione: {e}")
