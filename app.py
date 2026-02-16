@@ -59,13 +59,12 @@ try:
     df_a = conn.read(worksheet='abilita', ttl=10).fillna('')
     df_n = conn.read(worksheet='nemici', ttl=10).fillna(0)
     
-    # Normalizzazione colonne e tipi dati
+    # Normalizzazione colonne
     for col in ['razza', 'classe', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns: df_p[col] = 0 if col not in ['razza', 'classe', 'posizione', 'ultimo_visto'] else ''
     
     if not df_n.empty:
         df_n['hp'] = pd.to_numeric(df_n['hp'], errors='coerce').fillna(0)
-        # Pulizia stringhe posizione per evitare mismatch
         df_n['posizione'] = df_n['posizione'].astype(str).str.strip()
         df_p['posizione'] = df_p['posizione'].astype(str).str.strip()
 
@@ -101,7 +100,7 @@ nome_pg = pg['nome_pg']
 # LISTA GIOCATORI VIETATI (Tutti tranne il Master)
 lista_giocatori_vietati = ", ".join([name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg])
 
-# --- SIDEBAR COMPLETA ---
+# --- SIDEBAR COMPLETA (CON LOGICA ONLINE/OFFLINE RIPRISTINATA) ---
 with st.sidebar:
     st.header('🛡️ SCHEDA EROE')
     with st.container(border=True):
@@ -140,12 +139,23 @@ with st.sidebar:
     compagni = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
     for _, c in compagni.iterrows():
         with st.container(border=True):
+            # LOGICA ONLINE/OFFLINE
             try:
-                uv = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                st_cl = "🟢" if (datetime.now() - uv) < timedelta(minutes=10) else ""
-            except: st_cl = ""
-            st.markdown(f"**{c['nome_pg']}** {st_cl}")
+                ultimo_visto = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
+                if datetime.now() - ultimo_visto < timedelta(minutes=10):
+                    status_icon = "🟢 Online"
+                    status_time = ""
+                else:
+                    status_icon = "🔴 Offline"
+                    status_time = f"Ultimo: {ultimo_visto.strftime('%H:%M')}"
+            except:
+                status_icon = "❓"
+                status_time = ""
+            
+            st.markdown(f"**{c['nome_pg']}** {status_icon}")
             st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
+            if status_time:
+                st.caption(status_time)
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 # --- CHAT UI ---
@@ -168,7 +178,7 @@ if act := st.chat_input('Cosa fai?'):
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            # PROMPT MIGLIORATO ANTI-PUPPETEERING
+            # PROMPT ANTI-PUPPETEERING
             sys_msg = f"""Sei il Master. Giocatore Attuale: {nome_pg}.
             ALTRI GIOCATORI UMANI (NON TOCCARLI): {lista_giocatori_vietati}.
             NEMICI: {nem_info}.
@@ -180,7 +190,7 @@ if act := st.chat_input('Cosa fai?'):
             
             REGOLE MECCANICHE:
             1. Attacco: d20 (11-14=1, 15-19=2, 20=3). Abilità: d20 + 1d4.
-            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (cancellalo dalla scena).
+            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (descrivilo).
             3. XP: Assegna solo se nemico muore.
             4. NON mostrare calcoli nel testo. Solo narrazione.
             
