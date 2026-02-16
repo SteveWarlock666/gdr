@@ -59,13 +59,15 @@ try:
     df_a = conn.read(worksheet='abilita', ttl=10).fillna('')
     df_n = conn.read(worksheet='nemici', ttl=10).fillna(0)
     
-    # Controllo colonne vitali
+    # Normalizzazione colonne e tipi dati
     for col in ['razza', 'classe', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns: df_p[col] = 0 if col not in ['razza', 'classe', 'posizione', 'ultimo_visto'] else ''
     
-    # Conversione HP nemici in numeri
     if not df_n.empty:
         df_n['hp'] = pd.to_numeric(df_n['hp'], errors='coerce').fillna(0)
+        # Pulizia stringhe posizione per evitare mismatch
+        df_n['posizione'] = df_n['posizione'].astype(str).str.strip()
+        df_p['posizione'] = df_p['posizione'].astype(str).str.strip()
 
 except Exception as e:
     st.warning("Server Google occupati. Attendi 30 secondi e ricarica.")
@@ -155,26 +157,34 @@ if act := st.chat_input('Cosa fai?'):
         try:
             storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
             
-            # Recupero info nemici
+            # Recupero info nemici con filtro stretto
             nemici_presenti = df_n[df_n['posizione'] == pg['posizione']]
-            nem_info = "\n".join([f"- {n['nome_nemico']}: {int(n['hp'])} HP" for _, n in nemici_presenti.iterrows()])
+            if nemici_presenti.empty:
+                nem_info = "NESSUN NEMICO VISIBILE."
+            else:
+                nem_info = "\n".join([f"- {n['nome_nemico']}: {int(n['hp'])} HP" for _, n in nemici_presenti.iterrows()])
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
             sys_msg = f"""Sei il Master. Giocatore: {nome_pg} ({pg['classe']}).
-            NEMICI PRESENTI (HP ATTUALI): 
+            
+            [IMPORTANTE: NEMICI NELLA ZONA]
             {nem_info}
+            (Se la lista sopra è vuota, NON inventare nemici. Se c'è un nome, quello è il bersaglio).
             
-            REGOLE CALCOLO DANNI (Strict):
-            1. ATTACCO BASE: Lancia d20. 1-10=0 danni, 11-14=1 danno, 15-19=2 danni, 20=3 danni.
-            2. ABILITÀ: 
-               a. Calcola Danno Base col d20 (come sopra).
-               b. Lancia 1d4 separatamente.
-               c. SOMMA: Danno Base (da d20) + Risultato d4 = DANNI_NEMICO.
-            3. COSTI: Attacco base = 1 Vigore. Abilità = Costo scheda.
-            4. Se DANNI_NEMICO >= HP Nemico, Scrivi: "IL NEMICO MUORE".
+            REGOLE DI OUTPUT (VIETATO MOSTRARE CALCOLI):
+            1. Scrivi SOLO la narrazione. Non scrivere mai "Calcolo danni", "Lancio d20", "Somma". Mai.
+            2. Narra l'azione come un romanzo. Il risultato dei calcoli lo metti SOLO nei TAG alla fine.
             
-            TAG OUTPUT:
+            REGOLE MECCANICHE (Usale internamente):
+            1. Attacco d20 (11-14=1, 15-19=2, 20=3).
+            2. Abilità: d20 + 1d4 (somma i due risultati per il danno totale).
+            3. MORTALITÀ: Se (HP Nemico - DANNI_NEMICO) <= 0, scrivi nella narrazione che il nemico MUORE.
+            4. DANNI RICEVUTI: Se > 0, descrivi il nemico che colpisce il giocatore.
+            
+            FORMATO OBBLIGATORIO:
+            [Testo narrativo della scena...]
+            
             DANNI_NEMICO: X
             DANNI_RICEVUTI: X
             MANA_USATO: X
@@ -191,22 +201,17 @@ if act := st.chat_input('Cosa fai?'):
             
             v_nem, v_ric, v_mn, v_vg, v_xp = get_tag("DANNI_NEMICO", res), get_tag("DANNI_RICEVUTI", res), get_tag("MANA_USATO", res), get_tag("VIGORE_USATO", res), get_tag("XP", res)
             
-            # --- LOGICA GESTIONE NEMICI (DANNO E PULIZIA) ---
+            # GESTIONE NEMICI
             t_match = re.search(r"NOME_NEMICO:\s*([^\n,]+)", res)
             if t_match and v_nem > 0:
                 bersaglio = t_match.group(1).strip()
-                # Trova indice nemico
+                # Ricerca stringa esatta
                 idx_nem = df_n[(df_n['nome_nemico'] == bersaglio) & (df_n['posizione'] == pg['posizione'])].index
                 if not idx_nem.empty:
-                    # 1. Applica danno
                     df_n.loc[idx_nem, 'hp'] -= v_nem
-                    
-                    # 2. ELIMINA MORTI (HP <= 0) - Garbage Collection
-                    nemici_morti = df_n[df_n['hp'] <= 0].index
-                    if not nemici_morti.empty:
-                        df_n = df_n.drop(nemici_morti)
-                    
-                    # 3. Aggiorna DB
+                    # Garbage Collector: Rimuovi morti
+                    if df_n.loc[idx_nem, 'hp'].values[0] <= 0:
+                        df_n = df_n.drop(idx_nem)
                     conn.update(worksheet='nemici', data=df_n)
 
             # Aggiornamento PG
