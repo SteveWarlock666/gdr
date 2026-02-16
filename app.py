@@ -13,10 +13,25 @@ st.set_page_config(page_title='Apocrypha Master', layout='wide')
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
-    .small-font { font-size: 14px !important; margin-bottom: 2px; }
-    .stProgress { height: 7px !important; }
-    /* Nasconde i messaggi di errore del CSS precedentemente visibili */
-    div[data-testid="stMarkdownContainer"] > p { margin-bottom: 5px; }
+    .small-font { font-size: 13px !important; margin-bottom: 0px; }
+    
+    /* Altezza delle barre */
+    .stProgress { height: 6px !important; }
+    
+    /* Colore Barra HP (Rossa) - Prima occorrenza */
+    div[data-testid="stSidebar"] div.stProgress:nth-of-type(1) div[role="progressbar"] > div {
+        background-color: #ff4b4b !important;
+    }
+    /* Colore Barra MANA (Azzurra) - Seconda occorrenza */
+    div[data-testid="stSidebar"] div.stProgress:nth-of-type(2) div[role="progressbar"] > div {
+        background-color: #00f2ff !important;
+    }
+    /* Colore Barra VIGORE (Verde) - Terza occorrenza */
+    div[data-testid="stSidebar"] div.stProgress:nth-of-type(3) div[role="progressbar"] > div {
+        background-color: #00ff88 !important;
+    }
+    
+    div[data-testid="stMarkdownContainer"] > p { margin-bottom: 0px; }
     </style>
 """, unsafe_allow_html=True)
 
