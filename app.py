@@ -30,7 +30,9 @@ if 'GROQ_API_KEY' not in st.secrets:
 
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
-st_autorefresh(interval=30000, key='global_sync')
+
+# Aumentato a 60 secondi per evitare il blocco Quota di Google
+st_autorefresh(interval=60000, key='global_sync')
 
 if 'auth' not in st.session_state:
     st.session_state.auth = False
@@ -48,13 +50,14 @@ if not st.session_state.auth:
 
 XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
+# Lettura con piccolo TTL per risparmiare chiamate API
 try:
-    df_p = conn.read(worksheet='personaggi', ttl=0).fillna(0)
-    df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
-    df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
-    df_n = conn.read(worksheet='nemici', ttl=0).fillna(0)
+    df_p = conn.read(worksheet='personaggi', ttl=10).fillna(0)
+    df_m = conn.read(worksheet='messaggi', ttl=10).fillna('')
+    df_a = conn.read(worksheet='abilita', ttl=10).fillna('')
+    df_n = conn.read(worksheet='nemici', ttl=10).fillna(0)
 except Exception as e:
-    st.error(f"Errore database: {e}")
+    st.warning("I server di Google sono carichi. Attendi un momento e ricarica la pagina.")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
@@ -134,7 +137,7 @@ if act := st.chat_input('Cosa fai?'):
             
             sys_msg = f"""Sei il Master. Giocatore: {nome_pg}. Nemici: {nem_info}.
             REGOLE:
-            1. Sottrai DANNI_NEMICO dal foglio nemici. Se HP <= 0, narra la morte.
+            1. Sottrai DANNI_NEMICO dai nemici elencati. Se HP <= 0, il nemico muore.
             2. Se DANNI_RICEVUTI > 0, descrivi l'attacco nemico.
             3. COSTI: Sottrai Mana solo per tipo 'Mana', Vigore per 'Vigore' o base (costo 1).
             TAG: DANNI_NEMICO: X, DANNI_RICEVUTI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, NOME_NEMICO: nome, LUOGO: {pg['posizione']}"""
@@ -147,11 +150,13 @@ if act := st.chat_input('Cosa fai?'):
             
             v_nem, v_ric, v_mn, v_vg, v_xp = get_tag("DANNI_NEMICO", res), get_tag("DANNI_RICEVUTI", res), get_tag("MANA_USATO", res), get_tag("VIGORE_USATO", res), get_tag("XP", res)
             
+            # Aggiornamento Nemici
             target_match = re.search(r"NOME_NEMICO:\s*([^\n,]+)", res)
             if target_match:
                 df_n.loc[df_n['nome_nemico'] == target_match.group(1).strip(), 'hp'] -= v_nem
                 conn.update(worksheet='nemici', data=df_n)
 
+            # Aggiornamento Giocatore
             df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto']] = [max(0, int(pg['hp']) - v_ric), max(0, int(pg['mana']) - v_mn), max(0, int(pg['vigore']) - v_vg), datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
             if v_xp > 0: df_p.loc[df_p['posizione'] == pg['posizione'], 'xp'] += v_xp
             
@@ -161,4 +166,4 @@ if act := st.chat_input('Cosa fai?'):
             st.cache_data.clear()
             st.rerun()
         except Exception as e:
-            st.error(f"Errore: {e}")
+            st.error(f"Errore API: {e}")
