@@ -55,7 +55,7 @@ try:
     df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
 except Exception as e:
-    st.error(f"Errore: {e}")
+    st.error(f"Errore caricamento: {e}")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
@@ -110,3 +110,22 @@ if not user_pg_df.empty:
                 d_hp = re.search(r"DANNI:\s*(\d+)", res)
                 d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
                 d_vg = re.search(r"VIGORE_USATO:\s*(\d+)", res)
+                d_xp = re.search(r"XP:\s*(\d+)", res)
+                d_loc = re.search(r"LUOGO:\s*([^\n]+)", res)
+                
+                n_hp = max(0, int(pg['hp']) - (int(d_hp.group(1)) if d_hp else 0))
+                n_mn = max(0, int(pg['mana']) - (int(d_mn.group(1)) if d_mn else 0))
+                n_vg = max(0, int(pg['vigore']) - (int(d_vg.group(1)) if d_vg else 0))
+                n_xp = int(pg['xp']) + (int(d_xp.group(1)) if d_xp else 0)
+                n_loc = d_loc.group(1).strip() if d_loc else pg['posizione']
+                n_lvl = int(pg['lvl'])
+                if n_xp >= XP_LEVELS.get(n_lvl + 1, 99999): n_lvl += 1
+
+                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']] = [n_hp, n_mn, n_vg, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), n_loc]
+                conn.update(worksheet='personaggi', data=df_p)
+                new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
+                conn.update(worksheet='messaggi', data=new_m)
+                st.cache_data.clear()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Errore: {e}")
