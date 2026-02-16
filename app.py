@@ -5,7 +5,6 @@ from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 from datetime import datetime, timedelta
 import re
-import time
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
@@ -92,7 +91,7 @@ with st.sidebar:
         for _, abi in mie_abi.iterrows():
             with st.container(border=True):
                 st.markdown(f"<p style='font-size:12px; margin:0;'>**{abi['nome']}**</p>", unsafe_allow_html=True)
-                st.caption(f"{abi['tipo']} • 🧪 Costo: {abi['costo']} • 🎲 Narrazione: {abi['dadi']}")
+                st.caption(f"{abi['tipo']} • 🧪 {abi['costo']} • 🎲 {abi['dadi']}")
 
         st.divider()
         st.write("👥 Compagni:")
@@ -104,10 +103,8 @@ with st.sidebar:
                     status = "🟢" if (datetime.now() - ultimo_visto) < timedelta(minutes=10) else ""
                     time_str = "" if status else f"Ultima attività: {ultimo_visto.strftime('%H:%M')}"
                 except: status, time_str = "", "Offline"
-                
                 st.markdown(f"**{c['nome_pg']}** {status}")
                 st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
-                if time_str: st.caption(time_str)
                 st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 st.title('📜 Cronaca dell Abisso')
@@ -118,21 +115,21 @@ for _, r in df_m.tail(15).iterrows():
 if not user_pg_df.empty:
     if act := st.chat_input('Cosa fai?'):
         nome_mio = pg['nome_pg']
-        with st.spinner('Il Master lancia i dadi...'):
+        with st.spinner('Il Master narra...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
                 abi_info = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
                 
                 sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}.
-                REGOLE MECCANICHE:
-                1. Attacco Base: costo 1. Danni d20: 11-14=1HP, 15-19=2HP, 20=3HP al nemico.
-                2. Abilità: costo indicato. Danni: d20 (stessi scaglioni) + 1d4 mutatore al nemico.
-                TAG OBBLIGATORI (SOLO QUESTI):
-                DANNI_NEMICO: X, DANNI_RICEVUTI: X (solo se il giocatore è colpito), MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
+                REGOLE ATTACCO GIOCATORE:
+                - Base: costo 1. Danno d20: 11-14=1, 15-19=2, 20=3 HP al nemico.
+                - Abilità: costo indicato. Danno d20 (stessi scaglioni) + 1d4 mutatore al nemico.
+                REGOLE ATTACCO NEMICO:
+                - Se il nemico attacca, lancia un d20: 1-10=0, 11-14=1, 15-19=2, 20=3 HP di danno al GIOCATORE.
+                TAG OBBLIGATORI: DANNI_NEMICO: X, DANNI_RICEVUTI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
                 
                 res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
-                # Parsing corretto dei tag per evitare confusione tra danni inflitti e ricevuti
                 d_nem = re.search(r"DANNI_NEMICO:\s*(\d+)", res)
                 d_ric = re.search(r"DANNI_RICEVUTI:\s*(\d+)", res)
                 d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
@@ -155,10 +152,8 @@ if not user_pg_df.empty:
 
                 df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto', 'posizione']] = [n_hp, n_mn, n_vg, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), n_loc]
                 conn.update(worksheet='personaggi', data=df_p)
-                
                 new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
                 conn.update(worksheet='messaggi', data=new_m)
-                
                 st.cache_data.clear()
                 st.rerun()
             except Exception as e:
