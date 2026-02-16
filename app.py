@@ -101,16 +101,9 @@ with st.sidebar:
             with st.container(border=True):
                 try:
                     ultimo_visto = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                    differenza = datetime.now() - ultimo_visto
-                    if differenza < timedelta(minutes=10):
-                        status = "🟢"
-                        time_str = ""
-                    else:
-                        status = ""
-                        time_str = f"Ultima attività: {ultimo_visto.strftime('%H:%M')}"
-                except:
-                    status = ""
-                    time_str = "Offline"
+                    status = "🟢" if (datetime.now() - ultimo_visto) < timedelta(minutes=10) else ""
+                    time_str = "" if status else f"Ultima attività: {ultimo_visto.strftime('%H:%M')}"
+                except: status, time_str = "", "Offline"
                 
                 st.markdown(f"**{c['nome_pg']}** {status}")
                 st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
@@ -125,36 +118,37 @@ for _, r in df_m.tail(15).iterrows():
 if not user_pg_df.empty:
     if act := st.chat_input('Cosa fai?'):
         nome_mio = pg['nome_pg']
-        with st.spinner('Il Master narra...'):
+        with st.spinner('Il Master lancia i dadi...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
                 abi_info = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
                 
                 sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}.
-                REGOLE COSTI E DANNI:
-                1. Attacco Base: Sottrai 1 Mana o Vigore. Danni d20: 11-14=1HP, 15-19=2HP, 20=3HP.
-                2. Abilità: Sottrai costo indicato. Danni: d20 (stessi scaglioni) + 1d4 mutatore.
-                Usa i dadi narrativi delle abilità per descrivere l'effetto.
-                XP: Assegna XP: X solo a nemico ucciso. L'XP va a tutto il team nella stessa posizione.
-                TAG OBBLIGATORI: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
+                REGOLE MECCANICHE:
+                1. Attacco Base: costo 1. Danni d20: 11-14=1HP, 15-19=2HP, 20=3HP al nemico.
+                2. Abilità: costo indicato. Danni: d20 (stessi scaglioni) + 1d4 mutatore al nemico.
+                TAG OBBLIGATORI (SOLO QUESTI):
+                DANNI_NEMICO: X, DANNI_RICEVUTI: X (solo se il giocatore è colpito), MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
                 
                 res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
-                d_hp = re.search(r"DANNI:\s*(\d+)", res)
+                # Parsing corretto dei tag per evitare confusione tra danni inflitti e ricevuti
+                d_nem = re.search(r"DANNI_NEMICO:\s*(\d+)", res)
+                d_ric = re.search(r"DANNI_RICEVUTI:\s*(\d+)", res)
                 d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
                 d_vg = re.search(r"VIGORE_USATO:\s*(\d+)", res)
                 d_xp = re.search(r"XP:\s*(\d+)", res)
                 d_loc = re.search(r"LUOGO:\s*([^\n]+)", res)
                 
-                val_xp = int(d_xp.group(1)) if d_xp else 0
-                n_hp = max(0, int(pg['hp']) - (int(d_hp.group(1)) if d_hp else 0))
+                n_hp = max(0, int(pg['hp']) - (int(d_ric.group(1)) if d_ric else 0))
                 n_mn = max(0, int(pg['mana']) - (int(d_mn.group(1)) if d_mn else 0))
                 n_vg = max(0, int(pg['vigore']) - (int(d_vg.group(1)) if d_vg else 0))
+                v_xp = int(d_xp.group(1)) if d_xp else 0
                 n_loc = d_loc.group(1).strip() if d_loc else pg['posizione']
                 
-                if val_xp > 0:
+                if v_xp > 0:
                     mask = df_p['posizione'] == pg['posizione']
-                    df_p.loc[mask, 'xp'] = df_p.loc[mask, 'xp'].astype(int) + val_xp
+                    df_p.loc[mask, 'xp'] = df_p.loc[mask, 'xp'].astype(int) + v_xp
                     for idx in df_p[mask].index:
                         c_xp, c_lvl = int(df_p.at[idx, 'xp']), int(df_p.at[idx, 'lvl'])
                         if c_xp >= XP_LEVELS.get(c_lvl + 1, 99999): df_p.at[idx, 'lvl'] = c_lvl + 1
@@ -169,4 +163,3 @@ if not user_pg_df.empty:
                 st.rerun()
             except Exception as e:
                 st.error(f"Errore: {e}")
-            
