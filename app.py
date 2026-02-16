@@ -9,7 +9,7 @@ import time
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
-# --- CSS COMPLETO (BARRE, STILE, COMPATTEZZA) ---
+# --- CSS COMPLETO (NON SNELLITO) ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
@@ -59,9 +59,14 @@ try:
     df_a = conn.read(worksheet='abilita', ttl=10).fillna('')
     df_n = conn.read(worksheet='nemici', ttl=10).fillna(0)
     
-    # Controllo colonne vitali per evitare crash visuali
+    # Controllo colonne vitali
     for col in ['razza', 'classe', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns: df_p[col] = 0 if col not in ['razza', 'classe', 'posizione', 'ultimo_visto'] else ''
+    
+    # Conversione HP nemici in numeri
+    if not df_n.empty:
+        df_n['hp'] = pd.to_numeric(df_n['hp'], errors='coerce').fillna(0)
+
 except Exception as e:
     st.warning("Server Google occupati. Attendi 30 secondi e ricarica.")
     st.stop()
@@ -91,13 +96,12 @@ if user_pg_df.empty:
 pg = user_pg_df.iloc[0]
 nome_pg = pg['nome_pg']
 
-# --- SIDEBAR COMPLETA (MAI PIÙ SNELLITA) ---
+# --- SIDEBAR COMPLETA ---
 with st.sidebar:
     st.header('🛡️ SCHEDA EROE')
     with st.container(border=True):
         st.markdown(f"**{nome_pg} (Lv. {int(pg['lvl'])})**")
         st.caption(f"📍 {pg['posizione']}")
-        # ECCO LA RIGA CHE MANCAVA! RAZZA E CLASSE:
         st.caption(f"{pg['razza']} • {pg['classe']}")
         
         st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">❤️ HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
@@ -136,7 +140,6 @@ with st.sidebar:
                 st_cl = "🟢" if (datetime.now() - uv) < timedelta(minutes=10) else ""
             except: st_cl = ""
             st.markdown(f"**{c['nome_pg']}** {st_cl}")
-            # ECCO LA RIGA MANCANTE ANCHE PER I COMPAGNI:
             st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
@@ -151,27 +154,33 @@ if act := st.chat_input('Cosa fai?'):
     with st.spinner('Il Master narra...'):
         try:
             storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
+            
             # Recupero info nemici
             nemici_presenti = df_n[df_n['posizione'] == pg['posizione']]
             nem_info = "\n".join([f"- {n['nome_nemico']}: {int(n['hp'])} HP" for _, n in nemici_presenti.iterrows()])
-            # Recupero info abilità
+            
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            sys_msg = f"""Sei il Master. Giocatore: {nome_pg} ({pg['classe']}). Nemici presenti: {nem_info}.
-            REGOLE MECCANICHE (Strict):
-            1. OGNI attacco usa il d20. Danni Nemico: 11-14=1, 15-19=2, 20=3.
-            2. Abilità: d20 + 1d4. Attacco base: d20.
-            3. COSTI: Attacco base = 1 Vigore. Abilità = Costo scheda (Vigore o Mana). MAI entrambi.
-            4. DANNI RICEVUTI: Se > 0, DEVI descrivere nel testo come il nemico colpisce.
-            5. NEMICI: Sottrai i danni agli HP dei nemici. Se <= 0, narra la morte.
+            sys_msg = f"""Sei il Master. Giocatore: {nome_pg} ({pg['classe']}).
+            NEMICI PRESENTI (HP ATTUALI): 
+            {nem_info}
             
-            TAG OUTPUT (Fine messaggio):
+            REGOLE CALCOLO DANNI (Strict):
+            1. ATTACCO BASE: Lancia d20. 1-10=0 danni, 11-14=1 danno, 15-19=2 danni, 20=3 danni.
+            2. ABILITÀ: 
+               a. Calcola Danno Base col d20 (come sopra).
+               b. Lancia 1d4 separatamente.
+               c. SOMMA: Danno Base (da d20) + Risultato d4 = DANNI_NEMICO.
+            3. COSTI: Attacco base = 1 Vigore. Abilità = Costo scheda.
+            4. Se DANNI_NEMICO >= HP Nemico, Scrivi: "IL NEMICO MUORE".
+            
+            TAG OUTPUT:
             DANNI_NEMICO: X
             DANNI_RICEVUTI: X
             MANA_USATO: X
             VIGORE_USATO: X
             XP: X
-            NOME_NEMICO: nome_bersaglio
+            NOME_NEMICO: nome_esatto_lista
             LUOGO: {pg['posizione']}"""
             
             res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Abilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
@@ -182,14 +191,22 @@ if act := st.chat_input('Cosa fai?'):
             
             v_nem, v_ric, v_mn, v_vg, v_xp = get_tag("DANNI_NEMICO", res), get_tag("DANNI_RICEVUTI", res), get_tag("MANA_USATO", res), get_tag("VIGORE_USATO", res), get_tag("XP", res)
             
-            # Aggiornamento Nemici su foglio separato
+            # --- LOGICA GESTIONE NEMICI (DANNO E PULIZIA) ---
             t_match = re.search(r"NOME_NEMICO:\s*([^\n,]+)", res)
             if t_match and v_nem > 0:
                 bersaglio = t_match.group(1).strip()
-                # Trova e aggiorna il nemico specifico
+                # Trova indice nemico
                 idx_nem = df_n[(df_n['nome_nemico'] == bersaglio) & (df_n['posizione'] == pg['posizione'])].index
                 if not idx_nem.empty:
+                    # 1. Applica danno
                     df_n.loc[idx_nem, 'hp'] -= v_nem
+                    
+                    # 2. ELIMINA MORTI (HP <= 0) - Garbage Collection
+                    nemici_morti = df_n[df_n['hp'] <= 0].index
+                    if not nemici_morti.empty:
+                        df_n = df_n.drop(nemici_morti)
+                    
+                    # 3. Aggiorna DB
                     conn.update(worksheet='nemici', data=df_n)
 
             # Aggiornamento PG
