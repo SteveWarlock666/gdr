@@ -9,6 +9,7 @@ import time
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
+# --- CSS COMPLETO (BARRE, STILE, COMPATTEZZA) ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
@@ -30,11 +31,14 @@ if 'GROQ_API_KEY' not in st.secrets:
 
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
+
+# Refresh a 60s per evitare errore 429 di Google
 st_autorefresh(interval=60000, key='global_sync')
 
 if 'auth' not in st.session_state:
     st.session_state.auth = False
 
+# --- LOGIN ---
 if not st.session_state.auth:
     st.title('🌑 APOCRYPHA')
     u = st.text_input('Username')
@@ -48,25 +52,37 @@ if not st.session_state.auth:
 
 XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
+# --- CARICAMENTO DATI (TTL 10s per cache) ---
 try:
     df_p = conn.read(worksheet='personaggi', ttl=10).fillna(0)
     df_m = conn.read(worksheet='messaggi', ttl=10).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=10).fillna('')
     df_n = conn.read(worksheet='nemici', ttl=10).fillna(0)
-except:
-    st.warning("Server carichi, attendi un istante.")
+    
+    # Controllo colonne vitali per evitare crash visuali
+    for col in ['razza', 'classe', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
+        if col not in df_p.columns: df_p[col] = 0 if col not in ['razza', 'classe', 'posizione', 'ultimo_visto'] else ''
+except Exception as e:
+    st.warning("Server Google occupati. Attendi 30 secondi e ricarica.")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
 
+# --- CREAZIONE PG (SE MANCA) ---
 if user_pg_df.empty:
     st.title("🛡️ Crea il tuo Eroe")
     with st.form("creazione_pg"):
-        n_nuovo = st.text_input("Nome")
+        n_nuovo = st.text_input("Nome Eroe")
         r_nuova = st.selectbox("Razza", ["Umano", "Elfo", "Nano", "Oscuro"])
         c_nuova = st.selectbox("Classe", ["Guerriero", "Mago", "Ladro", "Chierico"])
-        if st.form_submit_button("Inizia"):
-            nuovo = pd.DataFrame([{"username": st.session_state.user, "nome_pg": n_nuovo, "razza": r_nuova, "classe": c_nuova, "hp": 20, "mana": 20, "vigore": 20, "xp": 0, "lvl": 1, "posizione": "Strada per Gauvadon", "ultimo_visto": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}])
+        if st.form_submit_button("Inizia Avventura"):
+            nuovo = pd.DataFrame([{
+                "username": st.session_state.user, "nome_pg": n_nuovo, 
+                "razza": r_nuova, "classe": c_nuova, 
+                "hp": 20, "mana": 20, "vigore": 20, "xp": 0, "lvl": 1, 
+                "posizione": "Strada per Gauvadon", 
+                "ultimo_visto": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }])
             df_p = pd.concat([df_p, nuovo], ignore_index=True)
             conn.update(worksheet='personaggi', data=df_p)
             st.rerun()
@@ -75,14 +91,33 @@ if user_pg_df.empty:
 pg = user_pg_df.iloc[0]
 nome_pg = pg['nome_pg']
 
+# --- SIDEBAR COMPLETA (MAI PIÙ SNELLITA) ---
 with st.sidebar:
     st.header('🛡️ SCHEDA EROE')
     with st.container(border=True):
         st.markdown(f"**{nome_pg} (Lv. {int(pg['lvl'])})**")
         st.caption(f"📍 {pg['posizione']}")
-        st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">❤️ HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True); st.progress(max(0.0, min(1.0, int(pg['hp']) / 20))); st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">✨ MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True); st.progress(max(0.0, min(1.0, int(pg['mana']) / 20))); st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">⚡ VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True); st.progress(max(0.0, min(1.0, int(pg['vigore']) / 20))); st.markdown('</div>', unsafe_allow_html=True)
+        # ECCO LA RIGA CHE MANCAVA! RAZZA E CLASSE:
+        st.caption(f"{pg['razza']} • {pg['classe']}")
+        
+        st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">❤️ HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
+        st.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">✨ MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True)
+        st.progress(max(0.0, min(1.0, int(pg['mana']) / 20)))
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">⚡ VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True)
+        st.progress(max(0.0, min(1.0, int(pg['vigore']) / 20)))
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.divider()
+        cur_lvl, cur_xp = int(pg['lvl']), int(pg['xp'])
+        next_xp = XP_LEVELS.get(cur_lvl + 1, 99999)
+        st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">📖 XP: {cur_xp}/{next_xp}</p>', unsafe_allow_html=True)
+        st.progress(max(0.0, min(1.0, cur_xp / next_xp)))
+        st.markdown('</div>', unsafe_allow_html=True)
     
     st.write("📜 Abilità:")
     mie_abi = df_a[df_a['proprietario'] == nome_pg]
@@ -101,30 +136,45 @@ with st.sidebar:
                 st_cl = "🟢" if (datetime.now() - uv) < timedelta(minutes=10) else ""
             except: st_cl = ""
             st.markdown(f"**{c['nome_pg']}** {st_cl}")
-            st.caption(f"Liv. {int(c['lvl'])} • {c['razza']}")
+            # ECCO LA RIGA MANCANTE ANCHE PER I COMPAGNI:
+            st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
+# --- CHAT UI ---
 st.title('📜 Cronaca dell\'Abisso')
 for _, r in df_m.tail(15).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
         st.write(f"**{r['autore']}**: {r['testo']}")
 
+# --- LOGICA MASTER E COMBATTIMENTO ---
 if act := st.chat_input('Cosa fai?'):
     with st.spinner('Il Master narra...'):
         try:
             storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
-            nem_info = "\n".join([f"- {n['nome_nemico']}: {int(n['hp'])} HP" for _, n in df_n[df_n['posizione'] == pg['posizione']].iterrows()])
+            # Recupero info nemici
+            nemici_presenti = df_n[df_n['posizione'] == pg['posizione']]
+            nem_info = "\n".join([f"- {n['nome_nemico']}: {int(n['hp'])} HP" for _, n in nemici_presenti.iterrows()])
+            # Recupero info abilità
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            sys_msg = f"""Sei il Master. Giocatore: {nome_pg}. Nemici: {nem_info}.
-            REGOLE MECCANICHE TASSATIVE (Ignora la fighitudine della descrizione):
-            1. OGNI attacco tira un d20. Danni al nemico: 11-14=1, 15-19=2, 20=3.
-            2. Se si usa un'abilità (NOME_ABILITA), somma +1d4 al danno d20 e scala il costo esatto.
-            3. Se NON è un'abilità, è attacco base: scala sempre 1 Vigore.
-            4. Se DANNI_RICEVUTI > 0, narra obbligatoriamente il colpo nemico.
-            TAG: DANNI_NEMICO: X, DANNI_RICEVUTI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, NOME_NEMICO: nome, LUOGO: {pg['posizione']}"""
+            sys_msg = f"""Sei il Master. Giocatore: {nome_pg} ({pg['classe']}). Nemici presenti: {nem_info}.
+            REGOLE MECCANICHE (Strict):
+            1. OGNI attacco usa il d20. Danni Nemico: 11-14=1, 15-19=2, 20=3.
+            2. Abilità: d20 + 1d4. Attacco base: d20.
+            3. COSTI: Attacco base = 1 Vigore. Abilità = Costo scheda (Vigore o Mana). MAI entrambi.
+            4. DANNI RICEVUTI: Se > 0, DEVI descrivere nel testo come il nemico colpisce.
+            5. NEMICI: Sottrai i danni agli HP dei nemici. Se <= 0, narra la morte.
             
-            res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Abilità disponibili: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
+            TAG OUTPUT (Fine messaggio):
+            DANNI_NEMICO: X
+            DANNI_RICEVUTI: X
+            MANA_USATO: X
+            VIGORE_USATO: X
+            XP: X
+            NOME_NEMICO: nome_bersaglio
+            LUOGO: {pg['posizione']}"""
+            
+            res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Abilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
             
             def get_tag(tag, text):
                 match = re.search(f"{tag}:\\s*(\\d+)", text)
@@ -132,17 +182,31 @@ if act := st.chat_input('Cosa fai?'):
             
             v_nem, v_ric, v_mn, v_vg, v_xp = get_tag("DANNI_NEMICO", res), get_tag("DANNI_RICEVUTI", res), get_tag("MANA_USATO", res), get_tag("VIGORE_USATO", res), get_tag("XP", res)
             
+            # Aggiornamento Nemici su foglio separato
             t_match = re.search(r"NOME_NEMICO:\s*([^\n,]+)", res)
-            if t_match:
-                df_n.loc[df_n['nome_nemico'] == t_match.group(1).strip(), 'hp'] -= v_nem
-                conn.update(worksheet='nemici', data=df_n)
+            if t_match and v_nem > 0:
+                bersaglio = t_match.group(1).strip()
+                # Trova e aggiorna il nemico specifico
+                idx_nem = df_n[(df_n['nome_nemico'] == bersaglio) & (df_n['posizione'] == pg['posizione'])].index
+                if not idx_nem.empty:
+                    df_n.loc[idx_nem, 'hp'] -= v_nem
+                    conn.update(worksheet='nemici', data=df_n)
 
-            df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto']] = [max(0, int(pg['hp']) - v_ric), max(0, int(pg['mana']) - v_mn), max(0, int(pg['vigore']) - v_vg), datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+            # Aggiornamento PG
+            df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto']] = [
+                max(0, int(pg['hp']) - v_ric), 
+                max(0, int(pg['mana']) - v_mn), 
+                max(0, int(pg['vigore']) - v_vg), 
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ]
+            
             if v_xp > 0: df_p.loc[df_p['posizione'] == pg['posizione'], 'xp'] += v_xp
             
             conn.update(worksheet='personaggi', data=df_p)
             new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_pg, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
             conn.update(worksheet='messaggi', data=new_m)
-            st.cache_data.clear(); st.rerun()
+            
+            st.cache_data.clear()
+            st.rerun()
         except Exception as e:
             st.error(f"Errore: {e}")
