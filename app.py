@@ -9,7 +9,6 @@ import re
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
-# CSS per barre sottili, colori fissi e layout ultra-compatto
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
@@ -107,11 +106,20 @@ for _, r in df_m.tail(15).iterrows():
 if not user_pg_df.empty:
     if act := st.chat_input('Cosa fai?'):
         nome_mio = pg['nome_pg']
-        with st.spinner('Il Master narra...'):
+        with st.spinner('Il Master lancia i dadi...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
                 dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
-                sys_msg = f"Sei un Master dark fantasy. Luogo attuale: {pg['posizione']}. Abilità di {nome_mio}: {dettagli_abi}. Regole: Simula tiri d4-d20, sottrai costi. Se il luogo cambia usa LUOGO: Nome Posto. Tag obbligatori: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X."
+                
+                # REGOLE DND AGGIORNATE: Nessun danno su fallimento semplice
+                sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Abilità di {nome_mio}: {dettagli_abi}.
+                REGOLE COMBATTIMENTO:
+                - Tira d20 per il successo. Se il tiro è basso ma non è 1, l'azione fallisce senza danni al giocatore.
+                - Applica DANNI: X solo se il giocatore viene colpito da un nemico o fa 1 naturale.
+                - Sottrai sempre il costo dell'abilità usata.
+                - Se il luogo cambia usa LUOGO: Nome Posto.
+                Tag obbligatori: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X."""
+                
                 res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nGiocatore {nome_mio}: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
                 d_hp = re.search(r"DANNI:\s*(\d+)", res)
