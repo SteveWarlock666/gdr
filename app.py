@@ -21,8 +21,8 @@ if 'auth' not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    st.title('🌑 APOCRYPHA')
-    u = st.text_input('Username')
+    st.title('📜​ SkyHeaven - IA-GDR by SteveWarlock666')
+    u = st.text_input('Nome (quello reale per identificarvi')
     p = st.text_input('Password', type='password')
     if st.button('Entra'):
         if p == 'apocrypha2026' and u:
@@ -44,7 +44,7 @@ with st.sidebar:
     st.header('🛡️ IL TUO EROE')
     
     if user_pg_df.empty:
-        with st.expander("✨ Risveglio"):
+        with st.expander("✨ Risveglio (crea pg"):
             n_pg = st.text_input('Nome PG')
             rz = st.selectbox('Razza', ['Fenrithar', 'Elling', 'Elpide', 'Minotauro', 'Narun', 'Feyrin', 'Primaris', 'Inferis'])
             cl = st.selectbox('Classe', ['Orrenai', 'Armagister', 'Mago'])
@@ -64,7 +64,7 @@ with st.sidebar:
             st.progress(max(0, min(20, hp_val)) / 20)
         
         st.divider()
-        st.write("👥 Compagni:")
+        st.write("👥 Compagni di avventura:")
         for _, r in df_p.iterrows():
             if r['username'] != st.session_state.user:
                 try:
@@ -79,7 +79,7 @@ with st.sidebar:
                     st.markdown(f"<small>{r['razza']} • {r['classe']}</small>", unsafe_allow_html=True)
                     st.caption(f"Salute: {r['hp']}/20")
 
-st.title('📜 Cronaca dell Abisso')
+st.title('📜 Cronaca di Viaggio')
 for _, r in df_m.tail(15).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
         st.write(f"**{r['autore']}**: {r['testo']}")
