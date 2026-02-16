@@ -51,12 +51,12 @@ try:
     df_p = conn.read(worksheet='personaggi', ttl=0)
     for col in ['mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns:
-            df_p[col] = 0 if col != 'posizione' else 'Skyheaven - Strada per Gauvadon'
+            df_p[col] = 0 if col != 'posizione' else 'Strada per Gauvadon'
     df_p = df_p.fillna(0)
     df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
 except Exception as e:
-    st.error(f"Errore caricamento: {e}")
+    st.error(f"Errore: {e}")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
@@ -91,7 +91,7 @@ with st.sidebar:
         for _, abi in mie_abi.iterrows():
             with st.container(border=True):
                 st.markdown(f"**{abi['nome']}**")
-                st.caption(f"{abi['tipo']} • Costo: {abi['costo']} • Narrazione: {abi['dadi']}")
+                st.caption(f"{abi['tipo']} • Costo: {abi['costo']}")
 
         st.divider()
         st.write("👥 Compagni:")
@@ -117,16 +117,14 @@ if not user_pg_df.empty:
         with st.spinner('Il Master narra...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
-                abi_list = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
+                abi_list = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']})" for _, a in mie_abi.iterrows()])
                 
                 sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}.
-                COSTI:
-                1. Attacco Base: Sottrai sempre 1 Mana o 1 Vigore a seconda del tipo di attacco.
-                2. Abilità: Sottrai il costo esatto indicato.
-                DANNI:
-                1. Base: d20 (11-14=1HP, 15-19=2HP, 20=3HP).
-                2. Abilità: d20 (stessi scaglioni) + 1d4 extra.
-                TAG: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
+                REGOLE COMBATTIMENTO:
+                1. Attacco Base: Sottrai 1 Mana o Vigore. Danno d20: 11-14=1HP, 15-19=2HP, 20=3HP.
+                2. Abilità: Sottrai costo abilità. Danno: d20 (stessi scaglioni) + 1d4 mutatore.
+                XP: Assegna XP: X solo se il nemico muore. L'XP va a tutti nella stessa posizione.
+                TAG OBBLIGATORI: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
                 
                 res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {abi_list}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
