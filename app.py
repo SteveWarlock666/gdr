@@ -9,7 +9,7 @@ import time
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
-# --- CSS COMPLETO (NON SNELLITO) ---
+# --- CSS COMPLETO ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
@@ -32,7 +32,7 @@ if 'GROQ_API_KEY' not in st.secrets:
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
 
-# Refresh a 60s per evitare errore 429 di Google
+# Refresh a 60s
 st_autorefresh(interval=60000, key='global_sync')
 
 if 'auth' not in st.session_state:
@@ -52,20 +52,18 @@ if not st.session_state.auth:
 
 XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
-# --- CARICAMENTO DATI (TTL 10s per cache) ---
+# --- CARICAMENTO DATI ---
 try:
     df_p = conn.read(worksheet='personaggi', ttl=10).fillna(0)
     df_m = conn.read(worksheet='messaggi', ttl=10).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=10).fillna('')
     df_n = conn.read(worksheet='nemici', ttl=10).fillna(0)
     
-    # Normalizzazione colonne e tipi dati
     for col in ['razza', 'classe', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns: df_p[col] = 0 if col not in ['razza', 'classe', 'posizione', 'ultimo_visto'] else ''
     
     if not df_n.empty:
         df_n['hp'] = pd.to_numeric(df_n['hp'], errors='coerce').fillna(0)
-        # Pulizia stringhe posizione per evitare mismatch
         df_n['posizione'] = df_n['posizione'].astype(str).str.strip()
         df_p['posizione'] = df_p['posizione'].astype(str).str.strip()
 
@@ -75,7 +73,7 @@ except Exception as e:
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
 
-# --- CREAZIONE PG (SE MANCA) ---
+# --- CREAZIONE PG ---
 if user_pg_df.empty:
     st.title("🛡️ Crea il tuo Eroe")
     with st.form("creazione_pg"):
@@ -97,6 +95,9 @@ if user_pg_df.empty:
 
 pg = user_pg_df.iloc[0]
 nome_pg = pg['nome_pg']
+
+# Recuperiamo la lista di TUTTI i nomi dei giocatori per vietare al Master di usarli
+lista_giocatori_vietati = ", ".join(df_p['nome_pg'].astype(str).unique().tolist())
 
 # --- SIDEBAR COMPLETA ---
 with st.sidebar:
@@ -151,45 +152,41 @@ for _, r in df_m.tail(15).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
         st.write(f"**{r['autore']}**: {r['testo']}")
 
-# --- LOGICA MASTER E COMBATTIMENTO ---
+# --- LOGICA MASTER ---
 if act := st.chat_input('Cosa fai?'):
     with st.spinner('Il Master narra...'):
         try:
             storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
             
-            # Recupero info nemici
             nemici_presenti = df_n[df_n['posizione'] == pg['posizione']]
             if nemici_presenti.empty:
-                nem_info = "NESSUN NEMICO VISIBILE."
+                nem_info = "NESSUN NEMICO VISIBILE (Non inventarne)."
             else:
                 nem_info = "\n".join([f"- {n['nome_nemico']}: {int(n['hp'])} HP" for _, n in nemici_presenti.iterrows()])
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            sys_msg = f"""Sei il Master. Giocatore: {nome_pg} ({pg['classe']}).
+            sys_msg = f"""Sei il Master. Giocatore Attuale: {nome_pg}.
+            GIOCATORI UMANI (NON INTERPRETARLI MAI): {lista_giocatori_vietati}.
+            NEMICI PRESENTI: {nem_info}.
             
-            [NEMICI PRESENTI (HP ATTUALI)]
-            {nem_info}
+            REGOLE DI SCRITTURA TASSATIVE:
+            1. VIETATO interpretare le azioni o i dialoghi di {lista_giocatori_vietati}.
+            2. Se un giocatore parla a un altro, descrivi SOLO l'ambiente/NPC, e lascia che l'altro risponda.
+            3. NON scrivere mai calcoli matematici nel testo. Solo narrazione.
             
-            REGOLE DI OUTPUT (VIETATO MOSTRARE CALCOLI):
-            1. Narra l'azione in modo coinvolgente. I calcoli falli mentalmente.
-            2. NON scrivere "Lancio dadi", "Risultato", "Somma". Scrivi solo la storia.
+            REGOLE MECCANICHE:
+            1. Attacco: d20 (11-14=1, 15-19=2, 20=3). Abilità: d20 + 1d4.
+            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (descrivilo).
+            3. XP: Assegna solo se nemico muore.
             
-            REGOLE MECCANICHE (Strict):
-            1. Attacco d20 (11-14=1, 15-19=2, 20=3).
-            2. Abilità: d20 + 1d4 (somma i due risultati per il danno).
-            3. MORTALITÀ: Se (HP Nemico - DANNI_NEMICO) <= 0, DEVI narrare la morte.
-            4. XP: Assegna XP nel tag SOLO se il nemico muore.
-            
-            FORMATO OBBLIGATORIO:
-            [Solo testo narrativo...]
-            
+            TAG OUTPUT:
             DANNI_NEMICO: X
             DANNI_RICEVUTI: X
             MANA_USATO: X
             VIGORE_USATO: X
             XP: X
-            NOME_NEMICO: nome_esatto_lista
+            NOME_NEMICO: nome
             LUOGO: {pg['posizione']}"""
             
             res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Abilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
@@ -200,28 +197,24 @@ if act := st.chat_input('Cosa fai?'):
             
             v_nem, v_ric, v_mn, v_vg, v_xp_proposed = get_tag("DANNI_NEMICO", res), get_tag("DANNI_RICEVUTI", res), get_tag("MANA_USATO", res), get_tag("VIGORE_USATO", res), get_tag("XP", res)
             
-            # Variabile per tracciare se l'XP è confermato
             xp_confermato = 0
-
-            # GESTIONE NEMICI E XP
+            
+            # GESTIONE NEMICI
             t_match = re.search(r"NOME_NEMICO:\s*([^\n,]+)", res)
             if t_match and v_nem > 0:
                 bersaglio = t_match.group(1).strip()
-                # Ricerca stringa esatta
                 idx_nem = df_n[(df_n['nome_nemico'] == bersaglio) & (df_n['posizione'] == pg['posizione'])].index
                 if not idx_nem.empty:
-                    # 1. Applica danno
                     nuovi_hp = df_n.loc[idx_nem, 'hp'].values[0] - v_nem
                     df_n.loc[idx_nem, 'hp'] = nuovi_hp
                     
-                    # 2. CONTROLLO MORTE REALE (Gatekeeper XP)
                     if nuovi_hp <= 0:
-                        df_n = df_n.drop(idx_nem) # Elimina nemico
-                        xp_confermato = v_xp_proposed # Accetta XP dal Master solo ora
+                        df_n = df_n.drop(idx_nem)
+                        xp_confermato = v_xp_proposed
                     
                     conn.update(worksheet='nemici', data=df_n)
 
-            # Aggiornamento PG (HP, Mana, Vigore)
+            # Aggiornamento PG
             df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto']] = [
                 max(0, int(pg['hp']) - v_ric), 
                 max(0, int(pg['mana']) - v_mn), 
@@ -229,10 +222,8 @@ if act := st.chat_input('Cosa fai?'):
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ]
             
-            # 3. DISTRIBUZIONE XP AL GRUPPO (Solo se xp_confermato > 0)
             if xp_confermato > 0:
-                mask_gruppo = df_p['posizione'] == pg['posizione']
-                df_p.loc[mask_gruppo, 'xp'] += xp_confermato
+                df_p.loc[df_p['posizione'] == pg['posizione'], 'xp'] += xp_confermato
             
             conn.update(worksheet='personaggi', data=df_p)
             new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_pg, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
