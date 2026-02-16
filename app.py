@@ -97,9 +97,23 @@ if user_pg_df.empty:
 pg = user_pg_df.iloc[0]
 nome_pg = pg['nome_pg']
 
-# LISTA GIOCATORI PRESENTI (per evitare allucinazioni)
-lista_giocatori_totali = ", ".join([name for name in df_p['nome_pg'].astype(str).unique().tolist()])
-lista_altri_giocatori = ", ".join([name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg])
+# --- CALCOLO LISTE ATTIVI/OFFLINE PER IL MASTER ---
+attivi = []
+offline = []
+for _, row in df_p.iterrows():
+    if str(row['username']) == str(st.session_state.user):
+        continue # Saltiamo noi stessi, siamo il Giocatore Attuale
+    try:
+        last_seen = datetime.strptime(str(row['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
+        if datetime.now() - last_seen < timedelta(minutes=10):
+            attivi.append(row['nome_pg'])
+        else:
+            offline.append(row['nome_pg'])
+    except:
+        offline.append(row['nome_pg'])
+
+str_attivi = ", ".join(attivi) if attivi else "Nessuno (oltre a te)"
+str_offline = ", ".join(offline) if offline else "Nessuno"
 
 # --- SIDEBAR COMPLETA ---
 with st.sidebar:
@@ -142,10 +156,18 @@ with st.sidebar:
         with st.container(border=True):
             try:
                 uv = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                st_cl = "🟢" if (datetime.now() - uv) < timedelta(minutes=10) else ""
-            except: st_cl = ""
-            st.markdown(f"**{c['nome_pg']}** {st_cl}")
+                if datetime.now() - uv < timedelta(minutes=10):
+                    status_icon = "🟢 Online"
+                    status_time = ""
+                else:
+                    status_icon = "🔴 Offline"
+                    status_time = f"Ultimo: {uv.strftime('%H:%M')}"
+            except:
+                status_icon = "❓"
+                status_time = ""
+            st.markdown(f"**{c['nome_pg']}** {status_icon}")
             st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
+            if status_time: st.caption(status_time)
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 # --- CHAT UI ---
@@ -168,21 +190,29 @@ if act := st.chat_input('Cosa fai?'):
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            # PROMPT CORRETTO CON REGOLE DI COERENZA
+            # PROMPT AGGIORNATO CON GESTIONE OFFLINE
             sys_msg = f"""Sei il Master. Giocatore Attuale: {nome_pg}.
-            PARTY PRESENTE: {lista_giocatori_totali}.
-            NEMICI: {nem_info}.
             
-            REGOLE NARRATIVE (Strict):
-            1. NON interpretare azioni/dialoghi di {lista_altri_giocatori}.
-            2. COERENZA NPC: Non far sparire gli NPC nel nulla. Se il giocatore si allontana, descrivi l'NPC che rimane indietro o saluta.
-            3. NO ALLUCINAZIONI: Non citare personaggi (es. Kaeryn) che non sono nella lista PARTY PRESENTE.
-            4. Nessun calcolo matematico nel testo.
+            [STATUS PARTY]
+            ALTRI GIOCATORI ATTIVI (Aspetta la loro risposta): {str_attivi}
+            GIOCATORI OFFLINE (Presenti ma passivi): {str_offline}
+            
+            [REGOLE GESTIONE GIOCATORI]
+            1. ATTIVI: Non descrivere MAI le loro azioni/dialoghi. Se {nome_pg} parla con loro, fermati e aspetta che rispondano.
+            2. OFFLINE (es. Kaeryn): Sono fisicamente presenti nel gruppo e seguono {nome_pg}, ma sono SILENZIOSI.
+               - NON farli parlare.
+               - NON farli prendere iniziative.
+               - Descrivili solo come "che seguono il gruppo" o "osservano".
+               - NON farli sparire nel nulla.
+            
+            [INFO NEMICI]
+            {nem_info}
             
             REGOLE MECCANICHE:
             1. Attacco: d20 (11-14=1, 15-19=2, 20=3). Abilità: d20 + 1d4.
-            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE.
-            3. XP: Solo se nemico muore.
+            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (descrivi morte e cancella).
+            3. XP: Assegna solo se nemico muore.
+            4. NO CALCOLI nel testo.
             
             TAG OUTPUT:
             DANNI_NEMICO: X
