@@ -9,7 +9,7 @@ import time
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
-# --- CSS COMPLETO ---
+# --- CSS COMPLETO (NON SNELLITO) ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
@@ -32,7 +32,7 @@ if 'GROQ_API_KEY' not in st.secrets:
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
 
-# Refresh a 60s
+# Refresh a 60s per evitare errore 429 di Google
 st_autorefresh(interval=60000, key='global_sync')
 
 if 'auth' not in st.session_state:
@@ -52,18 +52,20 @@ if not st.session_state.auth:
 
 XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
-# --- CARICAMENTO DATI ---
+# --- CARICAMENTO DATI (TTL 10s per cache) ---
 try:
     df_p = conn.read(worksheet='personaggi', ttl=10).fillna(0)
     df_m = conn.read(worksheet='messaggi', ttl=10).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=10).fillna('')
     df_n = conn.read(worksheet='nemici', ttl=10).fillna(0)
     
+    # Normalizzazione colonne e tipi dati
     for col in ['razza', 'classe', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns: df_p[col] = 0 if col not in ['razza', 'classe', 'posizione', 'ultimo_visto'] else ''
     
     if not df_n.empty:
         df_n['hp'] = pd.to_numeric(df_n['hp'], errors='coerce').fillna(0)
+        # Pulizia stringhe posizione per evitare mismatch
         df_n['posizione'] = df_n['posizione'].astype(str).str.strip()
         df_p['posizione'] = df_p['posizione'].astype(str).str.strip()
 
@@ -73,7 +75,7 @@ except Exception as e:
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
 
-# --- CREAZIONE PG ---
+# --- CREAZIONE PG (SE MANCA) ---
 if user_pg_df.empty:
     st.title("🛡️ Crea il tuo Eroe")
     with st.form("creazione_pg"):
@@ -96,8 +98,8 @@ if user_pg_df.empty:
 pg = user_pg_df.iloc[0]
 nome_pg = pg['nome_pg']
 
-# Recuperiamo la lista di TUTTI i nomi dei giocatori per vietare al Master di usarli
-lista_giocatori_vietati = ", ".join(df_p['nome_pg'].astype(str).unique().tolist())
+# LISTA GIOCATORI VIETATI (Tutti tranne il Master)
+lista_giocatori_vietati = ", ".join([name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg])
 
 # --- SIDEBAR COMPLETA ---
 with st.sidebar:
@@ -166,19 +168,21 @@ if act := st.chat_input('Cosa fai?'):
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
+            # PROMPT MIGLIORATO ANTI-PUPPETEERING
             sys_msg = f"""Sei il Master. Giocatore Attuale: {nome_pg}.
-            GIOCATORI UMANI (NON INTERPRETARLI MAI): {lista_giocatori_vietati}.
-            NEMICI PRESENTI: {nem_info}.
+            ALTRI GIOCATORI UMANI (NON TOCCARLI): {lista_giocatori_vietati}.
+            NEMICI: {nem_info}.
             
-            REGOLE DI SCRITTURA TASSATIVE:
-            1. VIETATO interpretare le azioni o i dialoghi di {lista_giocatori_vietati}.
-            2. Se un giocatore parla a un altro, descrivi SOLO l'ambiente/NPC, e lascia che l'altro risponda.
-            3. NON scrivere mai calcoli matematici nel testo. Solo narrazione.
+            REGOLA SUPREMA (ANTI-PUPPETEERING):
+            TU CONTROLLI SOLO IL MONDO E GLI NPC.
+            NON descrivere MAI le azioni, i pensieri o le parole di {lista_giocatori_vietati}.
+            Se {nome_pg} interagisce con loro, tu descrivi l'ambiente o l'NPC, e STOP. Lascia che siano loro a rispondere.
             
             REGOLE MECCANICHE:
             1. Attacco: d20 (11-14=1, 15-19=2, 20=3). Abilità: d20 + 1d4.
-            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (descrivilo).
+            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (cancellalo dalla scena).
             3. XP: Assegna solo se nemico muore.
+            4. NON mostrare calcoli nel testo. Solo narrazione.
             
             TAG OUTPUT:
             DANNI_NEMICO: X
@@ -223,7 +227,8 @@ if act := st.chat_input('Cosa fai?'):
             ]
             
             if xp_confermato > 0:
-                df_p.loc[df_p['posizione'] == pg['posizione'], 'xp'] += xp_confermato
+                mask_gruppo = df_p['posizione'] == pg['posizione']
+                df_p.loc[mask_gruppo, 'xp'] += xp_confermato
             
             conn.update(worksheet='personaggi', data=df_p)
             new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_pg, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
