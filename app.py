@@ -9,6 +9,7 @@ import re
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
+# CSS per barre sottili, colori fissi e layout ultra-compatto
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
@@ -52,12 +53,12 @@ try:
     df_p = conn.read(worksheet='personaggi', ttl=0)
     for col in ['mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns:
-            df_p[col] = 0 if col != 'posizione' else 'Ignota'
+            df_p[col] = 0 if col != 'posizione' else 'Skyheaven - Strada per Gauvadon'
     df_p = df_p.fillna(0)
     df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
 except Exception as e:
-    st.error(f"Errore: {e}")
+    st.error(f"Errore caricamento: {e}")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
@@ -71,21 +72,26 @@ with st.sidebar:
             st.markdown(f"**{nome_pg} (Lv. {int(pg['lvl'])})**")
             st.caption(f"📍 {pg['posizione']}")
             st.caption(f"{pg['razza']} • {pg['classe']}")
+            
             st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">❤️ HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
+            
             st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">✨ MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['mana']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
+            
             st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">⚡ VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['vigore']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
+            
             st.divider()
             cur_lvl, cur_xp = int(pg['lvl']), int(pg['xp'])
             next_xp = XP_LEVELS.get(cur_lvl + 1, 99999)
             st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">📖 XP: {cur_xp}/{next_xp}</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, cur_xp / next_xp)))
             st.markdown('</div>', unsafe_allow_html=True)
+
         st.write("📜 Abilità:")
         mie_abi = df_a[df_a['proprietario'] == nome_pg]
         for _, abi in mie_abi.iterrows():
