@@ -3,7 +3,7 @@ from groq import Groq
 from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 import time
 
@@ -102,8 +102,23 @@ with st.sidebar:
         compagni = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
         for _, c in compagni.iterrows():
             with st.container(border=True):
-                st.markdown(f"**{c['nome_pg']}**")
-                st.caption(f"{c['razza']} {c['classe']}")
+                # Calcolo stato online
+                try:
+                    ultimo_visto = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
+                    differenza = datetime.now() - ultimo_visto
+                    if differenza < timedelta(minutes=10):
+                        status = "🟢"
+                        time_str = ""
+                    else:
+                        status = ""
+                        time_str = f"Ultima attività: {ultimo_visto.strftime('%H:%M')}"
+                except:
+                    status = ""
+                    time_str = "Offline"
+                
+                st.markdown(f"**{c['nome_pg']}** {status}")
+                st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
+                if time_str: st.caption(time_str)
                 st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 st.title('📜 Cronaca dell Abisso')
