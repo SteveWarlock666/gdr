@@ -5,7 +5,6 @@ from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 from datetime import datetime, timedelta
 import re
-import time
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
@@ -57,10 +56,7 @@ try:
     df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
 except Exception as e:
-    if "429" in str(e):
-        st.warning("Quota Google esaurita. Attendi 30 secondi...")
-        st.stop()
-    st.error(f"Errore: {e}")
+    st.error(f"Errore caricamento: {e}")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
@@ -94,31 +90,20 @@ with st.sidebar:
         mie_abi = df_a[df_a['proprietario'] == nome_pg]
         for _, abi in mie_abi.iterrows():
             with st.container(border=True):
-                st.markdown(f"<p style='font-size:12px; margin:0;'>**{abi['nome']}**</p>", unsafe_allow_html=True)
-                st.caption(f"{abi['tipo']} • 🧪 {abi['costo']} • 🎲 {abi['dadi']}")
+                st.markdown(f"**{abi['nome']}**")
+                st.caption(f"{abi['tipo']} • Costo: {abi['costo']} • Narrazione: {abi['dadi']}")
 
         st.divider()
         st.write("👥 Compagni:")
         compagni = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
         for _, c in compagni.iterrows():
             with st.container(border=True):
-                # Calcolo stato online
                 try:
-                    ultimo_visto = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                    differenza = datetime.now() - ultimo_visto
-                    if differenza < timedelta(minutes=10):
-                        status = "🟢"
-                        time_str = ""
-                    else:
-                        status = ""
-                        time_str = f"Ultima attività: {ultimo_visto.strftime('%H:%M')}"
-                except:
-                    status = ""
-                    time_str = "Offline"
-                
+                    ultimo = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
+                    status = "🟢" if (datetime.now() - ultimo) < timedelta(minutes=10) else ""
+                except: status = ""
                 st.markdown(f"**{c['nome_pg']}** {status}")
                 st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
-                if time_str: st.caption(time_str)
                 st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 st.title('📜 Cronaca dell Abisso')
@@ -132,9 +117,18 @@ if not user_pg_df.empty:
         with st.spinner('Il Master narra...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
-                dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
-                sys_msg = f"Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}. REGOLE XP: Solo a nemico ucciso e per tutto il team. TAG: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."
-                res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {dettagli_abi}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
+                abi_list = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
+                
+                sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}.
+                COSTI:
+                1. Attacco Base: Sottrai sempre 1 Mana o 1 Vigore a seconda del tipo di attacco.
+                2. Abilità: Sottrai il costo esatto indicato.
+                DANNI:
+                1. Base: d20 (11-14=1HP, 15-19=2HP, 20=3HP).
+                2. Abilità: d20 (stessi scaglioni) + 1d4 extra.
+                TAG: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
+                
+                res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {abi_list}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
                 d_hp = re.search(r"DANNI:\s*(\d+)", res)
                 d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
