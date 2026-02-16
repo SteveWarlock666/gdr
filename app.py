@@ -157,7 +157,7 @@ if act := st.chat_input('Cosa fai?'):
         try:
             storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
             
-            # Recupero info nemici con filtro stretto
+            # Recupero info nemici
             nemici_presenti = df_n[df_n['posizione'] == pg['posizione']]
             if nemici_presenti.empty:
                 nem_info = "NESSUN NEMICO VISIBILE."
@@ -168,22 +168,21 @@ if act := st.chat_input('Cosa fai?'):
             
             sys_msg = f"""Sei il Master. Giocatore: {nome_pg} ({pg['classe']}).
             
-            [IMPORTANTE: NEMICI NELLA ZONA]
+            [NEMICI PRESENTI (HP ATTUALI)]
             {nem_info}
-            (Se la lista sopra è vuota, NON inventare nemici. Se c'è un nome, quello è il bersaglio).
             
             REGOLE DI OUTPUT (VIETATO MOSTRARE CALCOLI):
-            1. Scrivi SOLO la narrazione. Non scrivere mai "Calcolo danni", "Lancio d20", "Somma". Mai.
-            2. Narra l'azione come un romanzo. Il risultato dei calcoli lo metti SOLO nei TAG alla fine.
+            1. Narra l'azione in modo coinvolgente. I calcoli falli mentalmente.
+            2. NON scrivere "Lancio dadi", "Risultato", "Somma". Scrivi solo la storia.
             
-            REGOLE MECCANICHE (Usale internamente):
+            REGOLE MECCANICHE (Strict):
             1. Attacco d20 (11-14=1, 15-19=2, 20=3).
-            2. Abilità: d20 + 1d4 (somma i due risultati per il danno totale).
-            3. MORTALITÀ: Se (HP Nemico - DANNI_NEMICO) <= 0, scrivi nella narrazione che il nemico MUORE.
-            4. DANNI RICEVUTI: Se > 0, descrivi il nemico che colpisce il giocatore.
+            2. Abilità: d20 + 1d4 (somma i due risultati per il danno).
+            3. MORTALITÀ: Se (HP Nemico - DANNI_NEMICO) <= 0, DEVI narrare la morte.
+            4. XP: Assegna XP nel tag SOLO se il nemico muore.
             
             FORMATO OBBLIGATORIO:
-            [Testo narrativo della scena...]
+            [Solo testo narrativo...]
             
             DANNI_NEMICO: X
             DANNI_RICEVUTI: X
@@ -199,22 +198,30 @@ if act := st.chat_input('Cosa fai?'):
                 match = re.search(f"{tag}:\\s*(\\d+)", text)
                 return int(match.group(1)) if match else 0
             
-            v_nem, v_ric, v_mn, v_vg, v_xp = get_tag("DANNI_NEMICO", res), get_tag("DANNI_RICEVUTI", res), get_tag("MANA_USATO", res), get_tag("VIGORE_USATO", res), get_tag("XP", res)
+            v_nem, v_ric, v_mn, v_vg, v_xp_proposed = get_tag("DANNI_NEMICO", res), get_tag("DANNI_RICEVUTI", res), get_tag("MANA_USATO", res), get_tag("VIGORE_USATO", res), get_tag("XP", res)
             
-            # GESTIONE NEMICI
+            # Variabile per tracciare se l'XP è confermato
+            xp_confermato = 0
+
+            # GESTIONE NEMICI E XP
             t_match = re.search(r"NOME_NEMICO:\s*([^\n,]+)", res)
             if t_match and v_nem > 0:
                 bersaglio = t_match.group(1).strip()
                 # Ricerca stringa esatta
                 idx_nem = df_n[(df_n['nome_nemico'] == bersaglio) & (df_n['posizione'] == pg['posizione'])].index
                 if not idx_nem.empty:
-                    df_n.loc[idx_nem, 'hp'] -= v_nem
-                    # Garbage Collector: Rimuovi morti
-                    if df_n.loc[idx_nem, 'hp'].values[0] <= 0:
-                        df_n = df_n.drop(idx_nem)
+                    # 1. Applica danno
+                    nuovi_hp = df_n.loc[idx_nem, 'hp'].values[0] - v_nem
+                    df_n.loc[idx_nem, 'hp'] = nuovi_hp
+                    
+                    # 2. CONTROLLO MORTE REALE (Gatekeeper XP)
+                    if nuovi_hp <= 0:
+                        df_n = df_n.drop(idx_nem) # Elimina nemico
+                        xp_confermato = v_xp_proposed # Accetta XP dal Master solo ora
+                    
                     conn.update(worksheet='nemici', data=df_n)
 
-            # Aggiornamento PG
+            # Aggiornamento PG (HP, Mana, Vigore)
             df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto']] = [
                 max(0, int(pg['hp']) - v_ric), 
                 max(0, int(pg['mana']) - v_mn), 
@@ -222,7 +229,10 @@ if act := st.chat_input('Cosa fai?'):
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             ]
             
-            if v_xp > 0: df_p.loc[df_p['posizione'] == pg['posizione'], 'xp'] += v_xp
+            # 3. DISTRIBUZIONE XP AL GRUPPO (Solo se xp_confermato > 0)
+            if xp_confermato > 0:
+                mask_gruppo = df_p['posizione'] == pg['posizione']
+                df_p.loc[mask_gruppo, 'xp'] += xp_confermato
             
             conn.update(worksheet='personaggi', data=df_p)
             new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_pg, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
