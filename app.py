@@ -3,8 +3,7 @@ from groq import Groq
 from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 import pandas as pd
-from datetime import datetime, timedelta
-import random
+from datetime import datetime
 import re
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
@@ -20,7 +19,6 @@ st.markdown("""
     #mana-bar .stProgress div[role="progressbar"] > div { background-color: #00f2ff !important; }
     #stamina-bar .stProgress div[role="progressbar"] > div { background-color: #00ff88 !important; }
     #xp-bar .stProgress div[role="progressbar"] > div { background-color: #ffffff !important; }
-    div[data-testid="stVerticalBlock"] > div { padding-bottom: 0px !important; margin-bottom: 0px !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -49,26 +47,17 @@ if not st.session_state.auth:
 XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
 try:
-    # Forza la lettura delle colonne corrette
     df_p = conn.read(worksheet='personaggi', ttl=0)
-    
-    # Se il foglio è vuoto o manca la colonna username, la inizializziamo
-    if 'username' not in df_p.columns:
-        st.error("La colonna 'username' non è stata trovata nel foglio 'personaggi'. Controlla l'intestazione dello Sheet.")
-        st.stop()
-
     for col in ['mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns:
             df_p[col] = 0 if col != 'posizione' else 'Skyheaven - Strada per Gauvadon'
-    
     df_p = df_p.fillna(0)
     df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
 except Exception as e:
-    st.error(f"Errore caricamento dati: {e}")
+    st.error(f"Errore: {e}")
     st.stop()
 
-# Filtro utente sicuro
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
 
 with st.sidebar:
@@ -80,32 +69,21 @@ with st.sidebar:
             st.markdown(f"**{nome_pg} (Lv. {int(pg['lvl'])})**")
             st.caption(f"📍 {pg['posizione']}")
             st.caption(f"{pg['razza']} • {pg['classe']}")
-            
             st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">❤️ HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
-            
             st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">✨ MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['mana']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
-            
             st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">⚡ VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['vigore']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
-            
             st.divider()
             cur_lvl, cur_xp = int(pg['lvl']), int(pg['xp'])
             next_xp = XP_LEVELS.get(cur_lvl + 1, 99999)
             st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">📖 XP: {cur_xp}/{next_xp}</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, cur_xp / next_xp)))
             st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.write("📜 Abilità:")
-        mie_abi = df_a[df_a['proprietario'] == nome_pg]
-        for _, abi in mie_abi.iterrows():
-            with st.container(border=True):
-                st.markdown(f"<p style='font-size:12px; margin:0;'>**{abi['nome']}**</p>", unsafe_allow_html=True)
-                st.caption(f"{abi['tipo']} • 🧪 {abi['costo']} • 🎲 {abi['dadi']}")
 
 st.title('📜 Cronaca dell Abisso')
 for _, r in df_m.tail(15).iterrows():
@@ -118,34 +96,17 @@ if not user_pg_df.empty:
         with st.spinner('Il Master narra...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
+                mie_abi = df_a[df_a['proprietario'] == nome_mio]
                 dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
                 
                 sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}.
-                STILE: Narrazione pura. NON scrivere mai i risultati numerici dei dadi.
-                LOGICA: d20 per successo: 1-10 Fallimento, 11-14 (-1 HP nemico), 15-19 (-2 HP nemico), 20 Critico (-3 HP).
-                TAG OBBLIGATORI: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome (se cambia)."""
+                STYLE: Narrazione pura. NON scrivere mai risultati numerici (es. "roll: 15").
+                LOGICA: d20 interno per successo (1-10 Fallimento, 11-14 -1HP nemico, 15-19 -2HP, 20 Critico).
+                Usa i dadi dell'abilità per dare spessore alla descrizione.
+                TAG OBBLIGATORI: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
                 
                 res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {dettagli_abi}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
                 d_hp = re.search(r"DANNI:\s*(\d+)", res)
                 d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
                 d_vg = re.search(r"VIGORE_USATO:\s*(\d+)", res)
-                d_xp = re.search(r"XP:\s*(\d+)", res)
-                d_loc = re.search(r"LUOGO:\s*([^\n]+)", res)
-                
-                n_hp = max(0, int(pg['hp']) - (int(d_hp.group(1)) if d_hp else 0))
-                n_mn = max(0, int(pg['mana']) - (int(d_mn.group(1)) if d_mn else 0))
-                n_vg = max(0, int(pg['vigore']) - (int(d_vg.group(1)) if d_vg else 0))
-                n_xp = int(pg['xp']) + (int(d_xp.group(1)) if d_xp else 0)
-                n_loc = d_loc.group(1).strip() if d_loc else pg['posizione']
-                n_lvl = int(pg['lvl'])
-                if n_xp >= XP_LEVELS.get(n_lvl + 1, 99999): n_lvl += 1
-
-                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']] = [n_hp, n_mn, n_vg, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), n_loc]
-                conn.update(worksheet='personaggi', data=df_p)
-                new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
-                conn.update(worksheet='messaggi', data=new_m)
-                st.cache_data.clear()
-                st.rerun()
-            except Exception as e:
-                st.error(f"Errore durante l'azione: {e}")
