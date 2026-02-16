@@ -5,7 +5,6 @@ from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 from datetime import datetime, timedelta
 import re
-import time
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
@@ -92,7 +91,7 @@ with st.sidebar:
         for _, abi in mie_abi.iterrows():
             with st.container(border=True):
                 st.markdown(f"<p style='font-size:12px; margin:0;'>**{abi['nome']}**</p>", unsafe_allow_html=True)
-                st.caption(f"{abi['tipo']} • 🧪 Costo: {abi['costo']} • 🎲 {abi['dadi']}")
+                st.caption(f"{abi['tipo']} • 🧪 {abi['costo']} • 🎲 {abi['dadi']}")
 
         st.divider()
         st.write("👥 Compagni:")
@@ -101,20 +100,11 @@ with st.sidebar:
             with st.container(border=True):
                 try:
                     ultimo_visto = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                    differenza = datetime.now() - ultimo_visto
-                    if differenza < timedelta(minutes=10):
-                        status = "🟢"
-                        time_str = ""
-                    else:
-                        status = ""
-                        time_str = f"Ultima attività: {ultimo_visto.strftime('%H:%M')}"
-                except:
-                    status = ""
-                    time_str = "Offline"
-                
+                    status = "🟢" if (datetime.now() - ultimo_visto) < timedelta(minutes=10) else ""
+                    time_str = "" if status else f"Ultima attività: {ultimo_visto.strftime('%H:%M')}"
+                except: status, time_str = "", "Offline"
                 st.markdown(f"**{c['nome_pg']}** {status}")
                 st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
-                if time_str: st.caption(time_str)
                 st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 st.title('📜 Cronaca dell Abisso')
@@ -130,42 +120,49 @@ if not user_pg_df.empty:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
                 abi_info = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
                 
-                sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}.
-                REGOLE ATTACCO GIOCATORE:
-                - Base: costo 1. Danno d20: 11-14=1, 15-19=2, 20=3 HP al nemico.
-                - Abilità: costo indicato. Danno d20 (stessi scaglioni) + 1d4 mutatore al nemico.
-                REGOLE ATTACCO NEMICO:
-                - Se il nemico attacca, lancia d20: 11-14=1, 15-19=2, 20=3 HP al GIOCATORE.
-                TAG OBBLIGATORI: DANNI_NEMICO: X, DANNI_RICEVUTI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
+                sys_msg = f"""Sei un Master dark fantasy. Luogo attuale: {pg['posizione']}. Giocatore: {nome_mio}.
+                REGOLE TASSATIVE:
+                1. MAI descrivere i lanci dei dadi o i calcoli nel testo. Narra solo l'azione.
+                2. DANNI AL NEMICO: Attacco base (costo 1) d20: 11-14=1, 15-19=2, 20=3. Abilità: d20 + 1d4.
+                3. DANNI AL GIOCATORE: Se il nemico colpisce, usa d20 (11-14=1, 15-19=2, 20=3).
+                4. TAG OBBLIGATORI (usali per aggiornare le statistiche):
+                DANNI_NEMICO: X (danni fatti al mostro)
+                DANNI_RICEVUTI: X (danni fatti al giocatore Caelum)
+                MANA_USATO: X (solo se l'abilità è di tipo mana)
+                VIGORE_USATO: X (solo se l'abilità è di tipo vigore o attacco base)
+                XP: X (solo se il nemico muore)
+                LUOGO: NomePosizione"""
                 
                 res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
-                d_nem = re.search(r"DANNI_NEMICO:\s*(\d+)", res)
-                d_ric = re.search(r"DANNI_RICEVUTI:\s*(\d+)", res)
-                d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
-                d_vg = re.search(r"VIGORE_USATO:\s*(\d+)", res)
-                d_xp = re.search(r"XP:\s*(\d+)", res)
-                d_loc = re.search(r"LUOGO:\s*([^\n]+)", res)
+                # Parsing dei tag migliorato
+                def get_tag(tag, text):
+                    match = re.search(f"{tag}:\\s*(\\d+)", text)
+                    return int(match.group(1)) if match else 0
+
+                val_ric = get_tag("DANNI_RICEVUTI", res)
+                val_mn = get_tag("MANA_USATO", res)
+                val_vg = get_tag("VIGORE_USATO", res)
+                val_xp = get_tag("XP", res)
                 
-                n_hp = max(0, int(pg['hp']) - (int(d_ric.group(1)) if d_ric else 0))
-                n_mn = max(0, int(pg['mana']) - (int(d_mn.group(1)) if d_mn else 0))
-                n_vg = max(0, int(pg['vigore']) - (int(d_vg.group(1)) if d_vg else 0))
-                v_xp = int(d_xp.group(1)) if d_xp else 0
-                n_loc = d_loc.group(1).strip() if d_loc else pg['posizione']
+                loc_match = re.search(r"LUOGO:\s*([^\n]+)", res)
+                n_loc = loc_match.group(1).strip() if loc_match else pg['posizione']
                 
-                if v_xp > 0:
+                n_hp = max(0, int(pg['hp']) - val_ric)
+                n_mn = max(0, int(pg['mana']) - val_mn)
+                n_vg = max(0, int(pg['vigore']) - val_vg)
+                
+                if val_xp > 0:
                     mask = df_p['posizione'] == pg['posizione']
-                    df_p.loc[mask, 'xp'] = df_p.loc[mask, 'xp'].astype(int) + v_xp
+                    df_p.loc[mask, 'xp'] = df_p.loc[mask, 'xp'].astype(int) + val_xp
                     for idx in df_p[mask].index:
-                        c_xp, c_lvl = int(df_p.at[idx, 'xp']), int(df_p.at[idx, 'lvl'])
-                        if c_xp >= XP_LEVELS.get(c_lvl + 1, 99999): df_p.at[idx, 'lvl'] = c_lvl + 1
+                        if int(df_p.at[idx, 'xp']) >= XP_LEVELS.get(int(df_p.at[idx, 'lvl']) + 1, 99999):
+                            df_p.at[idx, 'lvl'] = int(df_p.at[idx, 'lvl']) + 1
 
                 df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto', 'posizione']] = [n_hp, n_mn, n_vg, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), n_loc]
                 conn.update(worksheet='personaggi', data=df_p)
-                
                 new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
                 conn.update(worksheet='messaggi', data=new_m)
-                
                 st.cache_data.clear()
                 st.rerun()
             except Exception as e:
