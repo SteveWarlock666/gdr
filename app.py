@@ -3,12 +3,12 @@ from groq import Groq
 from streamlit_gsheets import GSheetsConnection
 from streamlit_autorefresh import st_autorefresh
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
+import random
 import re
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
-# CSS per barre sottili e colori
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
@@ -20,6 +20,7 @@ st.markdown("""
     #mana-bar .stProgress div[role="progressbar"] > div { background-color: #00f2ff !important; }
     #stamina-bar .stProgress div[role="progressbar"] > div { background-color: #00ff88 !important; }
     #xp-bar .stProgress div[role="progressbar"] > div { background-color: #ffffff !important; }
+    div[data-testid="stVerticalBlock"] > div { padding-bottom: 0px !important; margin-bottom: 0px !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -47,18 +48,16 @@ if not st.session_state.auth:
 
 XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
-# Caricamento dati ottimizzato per evitare blocchi
 try:
-    df_p = conn.read(worksheet='personaggi', ttl="0s") # Forza lettura istantanea
+    df_p = conn.read(worksheet='personaggi', ttl=0)
     for col in ['mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
         if col not in df_p.columns:
             df_p[col] = 0 if col != 'posizione' else 'Skyheaven - Strada per Gauvadon'
     df_p = df_p.fillna(0)
-    
-    df_m = conn.read(worksheet='messaggi', ttl="0s").fillna('')
-    df_a = conn.read(worksheet='abilita', ttl="0s").fillna('')
+    df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
+    df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
 except Exception as e:
-    st.error(f"Connessione lenta... riprova tra un istante. Dettaglio: {e}")
+    st.error(f"Errore: {e}")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
@@ -87,6 +86,13 @@ with st.sidebar:
             st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">📖 XP: {cur_xp}/{next_xp}</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, cur_xp / next_xp)))
             st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.write("📜 Abilità:")
+        mie_abi = df_a[df_a['proprietario'] == nome_pg]
+        for _, abi in mie_abi.iterrows():
+            with st.container(border=True):
+                st.markdown(f"<p style='font-size:12px; margin:0;'>**{abi['nome']}**</p>", unsafe_allow_html=True)
+                st.caption(f"{abi['tipo']} • 🧪 {abi['costo']} • 🎲 {abi['dadi']}")
 
 st.title('📜 Cronaca dell Abisso')
 for _, r in df_m.tail(15).iterrows():
@@ -96,35 +102,40 @@ for _, r in df_m.tail(15).iterrows():
 if not user_pg_df.empty:
     if act := st.chat_input('Cosa fai?'):
         nome_mio = pg['nome_pg']
-        with st.spinner('Il Master narra...'):
+        with st.spinner('Il Master lancia i dadi...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
-                mie_abi = df_a[df_a['proprietario'] == nome_mio]
-                dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
+                dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi Narrativi: {a['dadi']})" for _, a in mie_abi.iterrows()])
                 
-                sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Giocatore: {nome_mio}.
-                STYLE: Narrazione pura. NON scrivere mai risultati numerici (es. "roll: 15").
-                LOGICA: d20 interno per successo (1-10 Fallimento, 11-14 -1HP nemico, 15-19 -2HP, 20 Critico).
-                Usa i dadi dell'abilità per dare spessore alla descrizione.
-                TAG OBBLIGATORI: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, LUOGO: Nome."""
+                sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Abilità di {nome_mio}: {dettagli_abi}.
+                REGOLE MECCANICHE (Usa d20):
+                - 1-10: Fallimento.
+                - 11-14: Successo lieve (-1 HP nemico).
+                - 15-19: Successo solido (-2 HP nemico).
+                - 20: Critico (-3 HP nemico).
                 
-                res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {dettagli_abi}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
+                REGOLE COSTI (OBBLIGATORIE):
+                - Devi sempre sottrarre il costo dell'abilità usata dal giocatore.
+                - Se usa un'abilità che costa 5 Vigore, devi scrivere VIGORE_USATO: 5 alla fine.
+                
+                TAG FINALI OBBLIGATORI (Sempre presenti):
+                DANNI: 0 (o X se colpito), MANA_USATO: X, VIGORE_USATO: X, XP: X."""
+                
+                res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nGiocatore {nome_mio}: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
                 d_hp = re.search(r"DANNI:\s*(\d+)", res)
                 d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
                 d_vg = re.search(r"VIGORE_USATO:\s*(\d+)", res)
                 d_xp = re.search(r"XP:\s*(\d+)", res)
-                d_loc = re.search(r"LUOGO:\s*([^\n]+)", res)
                 
                 n_hp = max(0, int(pg['hp']) - (int(d_hp.group(1)) if d_hp else 0))
                 n_mn = max(0, int(pg['mana']) - (int(d_mn.group(1)) if d_mn else 0))
                 n_vg = max(0, int(pg['vigore']) - (int(d_vg.group(1)) if d_vg else 0))
                 n_xp = int(pg['xp']) + (int(d_xp.group(1)) if d_xp else 0)
-                n_loc = d_loc.group(1).strip() if d_loc else pg['posizione']
                 n_lvl = int(pg['lvl'])
                 if n_xp >= XP_LEVELS.get(n_lvl + 1, 99999): n_lvl += 1
 
-                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']] = [n_hp, n_mn, n_vg, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), n_loc]
+                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto']] = [n_hp, n_mn, n_vg, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
                 conn.update(worksheet='personaggi', data=df_p)
                 new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
                 conn.update(worksheet='messaggi', data=new_m)
