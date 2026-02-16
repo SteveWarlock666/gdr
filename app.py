@@ -14,23 +14,25 @@ st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
     .small-font { font-size: 13px !important; margin-bottom: 0px; }
-    
-    /* Altezza delle barre */
     .stProgress { height: 6px !important; }
     
-    /* Colore Barra HP (Rossa) - Prima occorrenza */
-    div[data-testid="stSidebar"] div.stProgress:nth-of-type(1) div[role="progressbar"] > div {
+    /* Colore Rosso per la colonna HP */
+    [data-testid="column"]:has(p:contains("❤️")) + [data-testid="column"] .stProgress div[role="progressbar"] > div {
         background-color: #ff4b4b !important;
     }
-    /* Colore Barra MANA (Azzurra) - Seconda occorrenza */
-    div[data-testid="stSidebar"] div.stProgress:nth-of-type(2) div[role="progressbar"] > div {
+    /* Colore Azzurro per la colonna MANA */
+    [data-testid="column"]:has(p:contains("✨")) + [data-testid="column"] .stProgress div[role="progressbar"] > div {
         background-color: #00f2ff !important;
     }
-    /* Colore Barra VIGORE (Verde) - Terza occorrenza */
-    div[data-testid="stSidebar"] div.stProgress:nth-of-type(3) div[role="progressbar"] > div {
+    /* Colore Verde per la colonna VIGORE */
+    [data-testid="column"]:has(p:contains("⚡")) + [data-testid="column"] .stProgress div[role="progressbar"] > div {
         background-color: #00ff88 !important;
     }
-    
+    /* Colore Grigio/Bianco per XP */
+    [data-testid="column"]:has(p:contains("📖")) + [data-testid="column"] .stProgress div[role="progressbar"] > div {
+        background-color: #ffffff !important;
+    }
+
     div[data-testid="stMarkdownContainer"] > p { margin-bottom: 0px; }
     </style>
 """, unsafe_allow_html=True)
