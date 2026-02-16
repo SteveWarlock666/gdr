@@ -5,6 +5,7 @@ from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 from datetime import datetime, timedelta
 import re
+import time
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
@@ -91,7 +92,7 @@ with st.sidebar:
         for _, abi in mie_abi.iterrows():
             with st.container(border=True):
                 st.markdown(f"<p style='font-size:12px; margin:0;'>**{abi['nome']}**</p>", unsafe_allow_html=True)
-                st.caption(f"{abi['tipo']} • 🧪 {abi['costo']} • 🎲 {abi['dadi']}")
+                st.caption(f"{abi['tipo']} • 🧪 Costo: {abi['costo']} • 🎲 {abi['dadi']}")
 
         st.divider()
         st.write("👥 Compagni:")
@@ -105,6 +106,7 @@ with st.sidebar:
                 except: status, time_str = "", "Offline"
                 st.markdown(f"**{c['nome_pg']}** {status}")
                 st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
+                if time_str: st.caption(time_str)
                 st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 st.title('📜 Cronaca dell Abisso')
@@ -118,19 +120,20 @@ if not user_pg_df.empty:
         with st.spinner('Il Master narra...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
-                abi_info = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
+                abi_info = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Tipo: {a['tipo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
                 
                 sys_msg = f"""Sei il Master di un GDR dark fantasy. Giocatore: {nome_mio}.
-                REGOLE TASSATIVE DI NARRAZIONE:
-                1. Se il nemico colpisce (DANNI_RICEVUTI > 0), DEVI descrivere esplicitamente l'attacco nemico nel testo.
-                2. NON mostrare mai calcoli o dadi nel testo. Narra solo l'esito.
-                3. COSTI: Sottrai Mana SOLO per abilità tipo 'Mana'. Sottrai Vigore per attacchi base o tipo 'Vigore'.
-                TAG OBBLIGATORI (A FINE MESSAGGIO):
-                DANNI_NEMICO: X (danni al mostro)
-                DANNI_RICEVUTI: X (danni al giocatore, max 3)
-                MANA_USATO: X (solo se magia)
-                VIGORE_USATO: X (solo se fisico o base)
-                XP: X (solo se il nemico muore)
+                REGOLE TASSATIVE:
+                1. Se DANNI_RICEVUTI > 0, DEVI descrivere nel testo narrativo come il nemico attacca e ferisce Caelum.
+                2. COSTI: Se l'abilità usata è di tipo 'Vigore', sottrai SOLO Vigore. Se è di tipo 'Mana', sottrai SOLO Mana. Attacco base sottrae sempre 1 Vigore. MAI scalare entrambi se non richiesto esplicitamente.
+                3. DANNI AL NEMICO: Base d20 (11-14=1, 15-19=2, 20=3). Abilità d20 + 1d4 mutatore.
+                4. NON scrivere mai dadi o calcoli nel testo.
+                5. TAG OBBLIGATORI (SOLO VALORI DELL'AZIONE CORRENTE):
+                DANNI_NEMICO: X
+                DANNI_RICEVUTI: X
+                MANA_USATO: X
+                VIGORE_USATO: X
+                XP: X
                 LUOGO: {pg['posizione']}"""
                 
                 res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
@@ -149,8 +152,7 @@ if not user_pg_df.empty:
                 n_vg = max(0, int(pg['vigore']) - val_vg)
                 
                 if val_xp > 0:
-                    mask = df_p['posizione'] == pg['posizione']
-                    df_p.loc[mask, 'xp'] = df_p.loc[mask, 'xp'].astype(int) + val_xp
+                    df_p.loc[df_p['posizione'] == pg['posizione'], 'xp'] += val_xp
 
                 df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto']] = [n_hp, n_mn, n_vg, datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
                 conn.update(worksheet='personaggi', data=df_p)
