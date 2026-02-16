@@ -9,19 +9,37 @@ import re
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
-# CSS Definitivo per barre colorate e compattezza
+# CSS per eliminare spazi, margini e forzare i colori delle barre
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
-    .small-font { font-size: 13px !important; margin-bottom: 0px; }
-    .stProgress { height: 6px !important; }
+    div[data-testid="stSidebarUserContent"] { padding-top: 1rem; }
     
+    /* Riduzione font e margini contenitori */
+    .compact-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 4px;
+    }
+    .compact-label {
+        font-size: 12px !important;
+        min-width: 75px;
+        margin: 0 !important;
+        white-space: nowrap;
+    }
+    
+    /* Altezza fissa e sottile per le barre */
+    .stProgress { height: 6px !important; flex-grow: 1; }
+    
+    /* Forzatura Colori */
     #hp-bar .stProgress div[role="progressbar"] > div { background-color: #ff4b4b !important; }
     #mana-bar .stProgress div[role="progressbar"] > div { background-color: #00f2ff !important; }
     #stamina-bar .stProgress div[role="progressbar"] > div { background-color: #00ff88 !important; }
     #xp-bar .stProgress div[role="progressbar"] > div { background-color: #ffffff !important; }
 
-    div[data-testid="stMarkdownContainer"] > p { margin-bottom: 0px; }
+    /* Rimuove spazi tra gli elementi di Streamlit */
+    div[data-testid="stVerticalBlock"] > div { padding-bottom: 0px !important; margin-bottom: 0px !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -86,44 +104,39 @@ with st.sidebar:
         nome_pg = pg['nome_pg']
         
         with st.container(border=True):
-            st.subheader(f"{nome_pg} (Lv. {int(pg['lvl'])})")
+            st.markdown(f"**{nome_pg} (Lv. {int(pg['lvl'])})**")
             st.caption(f"{pg['razza']} • {pg['classe']}")
             
-            st.markdown('<div id="hp-bar">', unsafe_allow_html=True)
-            c_hp1, c_hp2 = st.columns([1, 2])
-            c_hp1.markdown(f"<p class='small-font'>❤️ HP: {int(pg['hp'])}/20</p>", unsafe_allow_html=True)
-            c_hp2.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
+            # HP Row
+            st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">❤️ HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
+            st.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
             
-            st.markdown('<div id="mana-bar">', unsafe_allow_html=True)
-            c_mn1, c_mn2 = st.columns([1, 2])
-            c_mn1.markdown(f"<p class='small-font'>✨ MN: {int(pg['mana'])}/20</p>", unsafe_allow_html=True)
-            c_mn2.progress(max(0.0, min(1.0, int(pg['mana']) / 20)))
+            # MANA Row
+            st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">✨ MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True)
+            st.progress(max(0.0, min(1.0, int(pg['mana']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
             
-            st.markdown('<div id="stamina-bar">', unsafe_allow_html=True)
-            c_vg1, c_vg2 = st.columns([1, 2])
-            c_vg1.markdown(f"<p class='small-font'>⚡ VG: {int(pg['vigore'])}/20</p>", unsafe_allow_html=True)
-            c_vg2.progress(max(0.0, min(1.0, int(pg['vigore']) / 20)))
+            # VIGORE Row
+            st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">⚡ VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True)
+            st.progress(max(0.0, min(1.0, int(pg['vigore']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
             
             st.divider()
             
-            st.markdown('<div id="xp-bar">', unsafe_allow_html=True)
-            cur_lvl = int(pg['lvl'])
+            # XP Row
+            cur_lvl, cur_xp = int(pg['lvl']), int(pg['xp'])
             next_xp = XP_LEVELS.get(cur_lvl + 1, 99999)
-            cur_xp = int(pg['xp'])
-            c_xp1, c_xp2 = st.columns([1, 2])
-            c_xp1.markdown(f"<p class='small-font'>📖 XP: {cur_xp}/{next_xp}</p>", unsafe_allow_html=True)
-            c_xp2.progress(max(0.0, min(1.0, cur_xp / next_xp)))
+            st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">📖 XP: {cur_xp}/{next_xp}</p>', unsafe_allow_html=True)
+            st.progress(max(0.0, min(1.0, cur_xp / next_xp)))
             st.markdown('</div>', unsafe_allow_html=True)
 
         st.write("📜 Abilità:")
         mie_abi = df_a[df_a['proprietario'] == nome_pg]
         for _, abi in mie_abi.iterrows():
             with st.container(border=True):
-                st.markdown(f"**{abi['nome']}**")
-                st.caption(f"{abi['tipo']} • Costo: {abi['costo']} • Dado: {abi['dadi']}")
+                st.markdown(f"<p style='font-size:13px; margin:0;'>**{abi['nome']}**</p>", unsafe_allow_html=True)
+                st.caption(f"{abi['tipo']} • 🧪 {abi['costo']} • 🎲 {abi['dadi']}")
 
         st.divider()
         st.write("👥 Compagni:")
@@ -135,7 +148,7 @@ with st.sidebar:
                 except: on = False
                 st_icon = "🟢" if on else "⚪"
                 with st.container(border=True):
-                    st.markdown(f"**{st_icon} {r['nome_pg']}** (Lv.{int(r['lvl'])})")
+                    st.markdown(f"<p style='font-size:13px; margin:0;'>**{st_icon} {r['nome_pg']}** (Lv.{int(r['lvl'])})</p>", unsafe_allow_html=True)
                     st.caption(f"HP: {int(r['hp'])}/20")
 
 st.title('📜 Cronaca dell Abisso')
