@@ -40,6 +40,7 @@ try:
             df_p[col] = 0 if col != 'lvl' else 1
     df_p = df_p.fillna(0)
     df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
+    df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
 except Exception as e:
     st.error(f"Errore caricamento dati: {e}")
     st.stop()
@@ -66,12 +67,18 @@ with st.sidebar:
                     st.rerun()
     else:
         pg = user_pg_df.iloc[0]
+        nome_pg = pg['nome_pg']
+        
         with st.container(border=True):
-            st.subheader(f"{pg['nome_pg']} (Lv. {int(pg['lvl'])})")
+            st.subheader(f"{nome_pg} (Lv. {int(pg['lvl'])})")
             st.caption(f"{pg['razza']} • {pg['classe']}")
             
             st.write(f"❤️ HP: {int(pg['hp'])}/20")
             st.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
+            
+            c_res = st.columns(2)
+            c_res[0].write(f"✨ MN: {int(pg['mana'])}")
+            c_res[1].write(f"⚡ VG: {int(pg['vigore'])}")
             
             cur_lvl = int(pg['lvl'])
             next_xp = XP_LEVELS.get(cur_lvl + 1, 99999)
@@ -79,21 +86,26 @@ with st.sidebar:
             st.write(f"📖 XP: {cur_xp}/{next_xp}")
             st.progress(max(0.0, min(1.0, cur_xp / next_xp)))
 
+        st.write("📜 Abilità Disponibili:")
+        mie_abi = df_a[df_a['proprietario'] == nome_pg]
+        for _, abi in mie_abi.iterrows():
+            with st.container(border=True):
+                st.markdown(f"**{abi['nome']}**")
+                st.caption(f"{abi['tipo']} • 🧪 {abi['costo']} • 🎲 {abi['dadi']}")
+                st.markdown(f"<small>{abi['descrizione']}</small>", unsafe_allow_html=True)
+
         st.divider()
         st.write("👥 Compagni:")
         for _, r in df_p.iterrows():
             if r['username'] != st.session_state.user:
                 try:
-                    last_seen = datetime.strptime(str(r['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                    is_online = datetime.now() - last_seen < timedelta(minutes=10)
+                    ls = datetime.strptime(str(r['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
+                    on = datetime.now() - ls < timedelta(minutes=10)
                 except:
-                    is_online = False
-                
-                status_icon = "🟢" if is_online else "⚪"
-                
+                    on = False
+                st_icon = "🟢" if on else "⚪"
                 with st.container(border=True):
-                    st.markdown(f"**{status_icon} {r['nome_pg']}** (Lv.{int(r['lvl'])})")
-                    st.markdown(f"<small>{r['razza']} • {r['classe']}</small>", unsafe_allow_html=True)
+                    st.markdown(f"**{st_icon} {r['nome_pg']}** (Lv.{int(r['lvl'])})")
                     st.caption(f"HP: {int(r['hp'])}/20")
 
 st.title('📜 Cronaca dell Abisso')
@@ -104,11 +116,23 @@ for _, r in df_m.tail(15).iterrows():
 if not user_pg_df.empty:
     if act := st.chat_input('Cosa fai?'):
         nome_mio = pg['nome_pg']
-        with st.spinner('Il Master narra...'):
+        with st.spinner('Il Master lancia i dadi...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(4).iterrows()])
-                sys_msg = "Sei un Master dark fantasy. Gestisci mostri e assegna XP solo per uccisioni. Tag: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X."
-                prompt = f"Contesto: {storia}\nGiocatore {nome_mio} (Lv.{pg['lvl']}) tenta: {act}\nd20: {random.randint(1, 20)}"
+                dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
+                
+                sys_msg = f"""Sei un Master dark fantasy.
+                Regolamento dadi: d4, d6, d8, d10, d12, d20.
+                Abilità di {nome_mio}:
+                {dettagli_abi}
+                
+                REGOLE:
+                1. Se il giocatore usa un'abilità, simula il tiro del dado specificato (es. 2d6) + d20 per il successo.
+                2. Sottrai il costo (Mana/Vigore).
+                3. Narra l'esito in modo brutale senza mostrare i numeri dei dadi.
+                4. Tag obbligatori se variano: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X."""
+                
+                prompt = f"Contesto: {storia}\nGiocatore {nome_mio} tenta: {act}"
                 
                 res = client.chat.completions.create(
                     messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
@@ -116,15 +140,18 @@ if not user_pg_df.empty:
                 ).choices[0].message.content
 
                 d_hp = re.search(r"DANNI:\s*(\d+)", res)
+                d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
+                d_vg = re.search(r"VIGORE_USATO:\s*(\d+)", res)
                 d_xp = re.search(r"XP:\s*(\d+)", res)
-                n_hp = max(0, int(pg['hp']) - (int(d_hp.group(1)) if d_hp else 0))
-                n_xp = int(pg['xp']) + (int(d_xp.group(1)) if d_xp else 0)
                 
+                n_hp = max(0, int(pg['hp']) - (int(d_hp.group(1)) if d_hp else 0))
+                n_mn = max(0, int(pg['mana']) - (int(d_mn.group(1)) if d_mn else 0))
+                n_vg = max(0, int(pg['vigore']) - (int(d_vg.group(1)) if d_vg else 0))
+                n_xp = int(pg['xp']) + (int(d_xp.group(1)) if d_xp else 0)
                 n_lvl = int(pg['lvl'])
-                if n_xp >= XP_LEVELS.get(n_lvl + 1, 99999):
-                    n_lvl += 1
+                if n_xp >= XP_LEVELS.get(n_lvl + 1, 99999): n_lvl += 1
 
-                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'xp', 'lvl', 'ultimo_visto']] = [n_hp, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto']] = [n_hp, n_mn, n_vg, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
                 conn.update(worksheet='personaggi', data=df_p)
 
                 new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
