@@ -14,7 +14,7 @@ st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
     .small-font { font-size: 14px !important; margin-bottom: 2px; }
-    .stProgress { height: 10px !important; }
+    .stProgress { height: 7px !important; }
     /* Nasconde i messaggi di errore del CSS precedentemente visibili */
     div[data-testid="stMarkdownContainer"] > p { margin-bottom: 5px; }
     </style>
