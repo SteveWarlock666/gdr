@@ -97,10 +97,11 @@ if user_pg_df.empty:
 pg = user_pg_df.iloc[0]
 nome_pg = pg['nome_pg']
 
-# LISTA GIOCATORI VIETATI (Tutti tranne il Master)
-lista_giocatori_vietati = ", ".join([name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg])
+# LISTA GIOCATORI PRESENTI (per evitare allucinazioni)
+lista_giocatori_totali = ", ".join([name for name in df_p['nome_pg'].astype(str).unique().tolist()])
+lista_altri_giocatori = ", ".join([name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg])
 
-# --- SIDEBAR COMPLETA (CON LOGICA ONLINE/OFFLINE RIPRISTINATA) ---
+# --- SIDEBAR COMPLETA ---
 with st.sidebar:
     st.header('🛡️ SCHEDA EROE')
     with st.container(border=True):
@@ -139,23 +140,12 @@ with st.sidebar:
     compagni = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
     for _, c in compagni.iterrows():
         with st.container(border=True):
-            # LOGICA ONLINE/OFFLINE
             try:
-                ultimo_visto = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                if datetime.now() - ultimo_visto < timedelta(minutes=10):
-                    status_icon = "🟢 Online"
-                    status_time = ""
-                else:
-                    status_icon = "🔴 Offline"
-                    status_time = f"Ultimo: {ultimo_visto.strftime('%H:%M')}"
-            except:
-                status_icon = "❓"
-                status_time = ""
-            
-            st.markdown(f"**{c['nome_pg']}** {status_icon}")
+                uv = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
+                st_cl = "🟢" if (datetime.now() - uv) < timedelta(minutes=10) else ""
+            except: st_cl = ""
+            st.markdown(f"**{c['nome_pg']}** {st_cl}")
             st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
-            if status_time:
-                st.caption(status_time)
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 # --- CHAT UI ---
@@ -178,21 +168,21 @@ if act := st.chat_input('Cosa fai?'):
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            # PROMPT ANTI-PUPPETEERING
+            # PROMPT CORRETTO CON REGOLE DI COERENZA
             sys_msg = f"""Sei il Master. Giocatore Attuale: {nome_pg}.
-            ALTRI GIOCATORI UMANI (NON TOCCARLI): {lista_giocatori_vietati}.
+            PARTY PRESENTE: {lista_giocatori_totali}.
             NEMICI: {nem_info}.
             
-            REGOLA SUPREMA (ANTI-PUPPETEERING):
-            TU CONTROLLI SOLO IL MONDO E GLI NPC.
-            NON descrivere MAI le azioni, i pensieri o le parole di {lista_giocatori_vietati}.
-            Se {nome_pg} interagisce con loro, tu descrivi l'ambiente o l'NPC, e STOP. Lascia che siano loro a rispondere.
+            REGOLE NARRATIVE (Strict):
+            1. NON interpretare azioni/dialoghi di {lista_altri_giocatori}.
+            2. COERENZA NPC: Non far sparire gli NPC nel nulla. Se il giocatore si allontana, descrivi l'NPC che rimane indietro o saluta.
+            3. NO ALLUCINAZIONI: Non citare personaggi (es. Kaeryn) che non sono nella lista PARTY PRESENTE.
+            4. Nessun calcolo matematico nel testo.
             
             REGOLE MECCANICHE:
             1. Attacco: d20 (11-14=1, 15-19=2, 20=3). Abilità: d20 + 1d4.
-            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (descrivilo).
-            3. XP: Assegna solo se nemico muore.
-            4. NON mostrare calcoli nel testo. Solo narrazione.
+            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE.
+            3. XP: Solo se nemico muore.
             
             TAG OUTPUT:
             DANNI_NEMICO: X
