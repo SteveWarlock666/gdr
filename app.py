@@ -57,7 +57,7 @@ try:
     df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
 except Exception as e:
-    st.error(f"Errore caricamento: {e}")
+    st.error(f"Errore: {e}")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
@@ -71,26 +71,22 @@ with st.sidebar:
             st.markdown(f"**{nome_pg} (Lv. {int(pg['lvl'])})**")
             st.caption(f"📍 {pg['posizione']}")
             st.caption(f"{pg['razza']} • {pg['classe']}")
-            
             st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">❤️ HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
-            
             st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">✨ MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['mana']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
-            
             st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">⚡ VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, int(pg['vigore']) / 20)))
             st.markdown('</div>', unsafe_allow_html=True)
-            
             st.divider()
             cur_lvl, cur_xp = int(pg['lvl']), int(pg['xp'])
             next_xp = XP_LEVELS.get(cur_lvl + 1, 99999)
             st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">📖 XP: {cur_xp}/{next_xp}</p>', unsafe_allow_html=True)
             st.progress(max(0.0, min(1.0, cur_xp / next_xp)))
             st.markdown('</div>', unsafe_allow_html=True)
-
+        
         st.write("📜 Abilità:")
         mie_abi = df_a[df_a['proprietario'] == nome_pg]
         for _, abi in mie_abi.iterrows():
@@ -109,16 +105,22 @@ if not user_pg_df.empty:
         with st.spinner('Il Master lancia i dadi...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
-                dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
+                dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi Narrativi: {a['dadi']})" for _, a in mie_abi.iterrows()])
                 
-                # REGOLE DND AGGIORNATE: Nessun danno su fallimento semplice
                 sys_msg = f"""Sei un Master dark fantasy. Luogo: {pg['posizione']}. Abilità di {nome_mio}: {dettagli_abi}.
-                REGOLE COMBATTIMENTO:
-                - Tira d20 per il successo. Se il tiro è basso ma non è 1, l'azione fallisce senza danni al giocatore.
-                - Applica DANNI: X solo se il giocatore viene colpito da un nemico o fa 1 naturale.
-                - Sottrai sempre il costo dell'abilità usata.
-                - Se il luogo cambia usa LUOGO: Nome Posto.
-                Tag obbligatori: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X."""
+                REGOLE SUCCESSO (Usa d20):
+                - 1-10: Fallimento.
+                - 11-14: Successo lieve (-1 HP nemico).
+                - 15-19: Successo solido (-2 HP nemico).
+                - 20: Critico (-3 HP nemico).
+                
+                REGOLE NARRATIVE (Usa i Dadi Narrativi dell'abilità):
+                - Se il d20 dà successo, descrivi l'entità dell'effetto in base al dado dell'abilità (es. un d12 è più spettacolare di un d4).
+                
+                IMPORTANTE:
+                - Sottrai HP a {nome_mio} SOLO se subisce un attacco nemico o fa 1 naturale.
+                - Sottrai sempre il costo in MANA o VIGORE.
+                - Tag obbligatori: DANNI: X (per {nome_mio}), MANA_USATO: X, VIGORE_USATO: X, XP: X."""
                 
                 res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nGiocatore {nome_mio}: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
@@ -126,17 +128,15 @@ if not user_pg_df.empty:
                 d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
                 d_vg = re.search(r"VIGORE_USATO:\s*(\d+)", res)
                 d_xp = re.search(r"XP:\s*(\d+)", res)
-                d_loc = re.search(r"LUOGO:\s*([^\n]+)", res)
                 
                 n_hp = max(0, int(pg['hp']) - (int(d_hp.group(1)) if d_hp else 0))
                 n_mn = max(0, int(pg['mana']) - (int(d_mn.group(1)) if d_mn else 0))
                 n_vg = max(0, int(pg['vigore']) - (int(d_vg.group(1)) if d_vg else 0))
                 n_xp = int(pg['xp']) + (int(d_xp.group(1)) if d_xp else 0)
-                n_loc = d_loc.group(1).strip() if d_loc else pg['posizione']
                 n_lvl = int(pg['lvl'])
                 if n_xp >= XP_LEVELS.get(n_lvl + 1, 99999): n_lvl += 1
 
-                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']] = [n_hp, n_mn, n_vg, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), n_loc]
+                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto']] = [n_hp, n_mn, n_vg, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
                 conn.update(worksheet='personaggi', data=df_p)
                 new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
                 conn.update(worksheet='messaggi', data=new_m)
