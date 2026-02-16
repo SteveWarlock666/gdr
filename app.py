@@ -9,6 +9,17 @@ import re
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
+# CSS per rimpicciolire i font e pulire l'interfaccia senza mostrare il codice
+st.markdown("""
+    <style>
+    .stApp { background-color: #0e1117; }
+    .small-font { font-size: 14px !important; margin-bottom: 2px; }
+    .stProgress { height: 10px !important; }
+    /* Nasconde i messaggi di errore del CSS precedentemente visibili */
+    div[data-testid="stMarkdownContainer"] > p { margin-bottom: 5px; }
+    </style>
+""", unsafe_allow_html=True)
+
 if 'GROQ_API_KEY' not in st.secrets:
     st.error("Manca la chiave!")
     st.stop()
@@ -73,26 +84,38 @@ with st.sidebar:
             st.subheader(f"{nome_pg} (Lv. {int(pg['lvl'])})")
             st.caption(f"{pg['razza']} • {pg['classe']}")
             
-            st.write(f"❤️ HP: {int(pg['hp'])}/20")
-            st.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
+            # --- NUOVA DISPOSIZIONE COMPATTA ---
+            # Riga HP
+            col_hp1, col_hp2 = st.columns([1, 2])
+            col_hp1.markdown(f"<p class='small-font'>❤️ HP: {int(pg['hp'])}/20</p>", unsafe_allow_html=True)
+            col_hp2.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
             
-            c_res = st.columns(2)
-            c_res[0].write(f"✨ MN: {int(pg['mana'])}")
-            c_res[1].write(f"⚡ VG: {int(pg['vigore'])}")
+            # Riga Mana
+            col_mn1, col_mn2 = st.columns([1, 2])
+            col_mn1.markdown(f"<p class='small-font'>✨ MN: {int(pg['mana'])}/20</p>", unsafe_allow_html=True)
+            col_mn2.progress(max(0.0, min(1.0, int(pg['mana']) / 20)))
             
+            # Riga Vigore
+            col_vg1, col_vg2 = st.columns([1, 2])
+            col_vg1.markdown(f"<p class='small-font'>⚡ VG: {int(pg['vigore'])}/20</p>", unsafe_allow_html=True)
+            col_vg2.progress(max(0.0, min(1.0, int(pg['vigore']) / 20)))
+            
+            st.divider()
+            
+            # Riga XP
             cur_lvl = int(pg['lvl'])
             next_xp = XP_LEVELS.get(cur_lvl + 1, 99999)
             cur_xp = int(pg['xp'])
-            st.write(f"📖 XP: {cur_xp}/{next_xp}")
-            st.progress(max(0.0, min(1.0, cur_xp / next_xp)))
+            col_xp1, col_xp2 = st.columns([1, 2])
+            col_xp1.markdown(f"<p class='small-font'>📖 XP: {cur_xp}/{next_xp}</p>", unsafe_allow_html=True)
+            col_xp2.progress(max(0.0, min(1.0, cur_xp / next_xp)))
 
-        st.write("📜 Abilità Disponibili:")
+        st.write("📜 Abilità:")
         mie_abi = df_a[df_a['proprietario'] == nome_pg]
         for _, abi in mie_abi.iterrows():
             with st.container(border=True):
                 st.markdown(f"**{abi['nome']}**")
-                st.caption(f"{abi['tipo']} • 🧪 {abi['costo']} • 🎲 {abi['dadi']}")
-                st.markdown(f"<small>{abi['descrizione']}</small>", unsafe_allow_html=True)
+                st.caption(f"{abi['tipo']} • Costo: {abi['costo']} • Dado: {abi['dadi']}")
 
         st.divider()
         st.write("👥 Compagni:")
@@ -101,8 +124,7 @@ with st.sidebar:
                 try:
                     ls = datetime.strptime(str(r['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
                     on = datetime.now() - ls < timedelta(minutes=10)
-                except:
-                    on = False
+                except: on = False
                 st_icon = "🟢" if on else "⚪"
                 with st.container(border=True):
                     st.markdown(f"**{st_icon} {r['nome_pg']}** (Lv.{int(r['lvl'])})")
@@ -120,25 +142,10 @@ if not user_pg_df.empty:
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(4).iterrows()])
                 dettagli_abi = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
-                
-                sys_msg = f"""Sei un Master dark fantasy.
-                Regolamento dadi: d4, d6, d8, d10, d12, d20.
-                Abilità di {nome_mio}:
-                {dettagli_abi}
-                
-                REGOLE:
-                1. Se il giocatore usa un'abilità, simula il tiro del dado specificato (es. 2d6) + d20 per il successo.
-                2. Sottrai il costo (Mana/Vigore).
-                3. Narra l'esito in modo brutale senza mostrare i numeri dei dadi.
-                4. Tag obbligatori se variano: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X."""
-                
+                sys_msg = f"Sei un Master dark fantasy. Abilità di {nome_mio}: {dettagli_abi}. Regole: Simula tiri d4-d20, sottrai costi, tag obbligatori: DANNI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X."
                 prompt = f"Contesto: {storia}\nGiocatore {nome_mio} tenta: {act}"
+                res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
-                res = client.chat.completions.create(
-                    messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
-                    model="llama-3.3-70b-versatile"
-                ).choices[0].message.content
-
                 d_hp = re.search(r"DANNI:\s*(\d+)", res)
                 d_mn = re.search(r"MANA_USATO:\s*(\d+)", res)
                 d_vg = re.search(r"VIGORE_USATO:\s*(\d+)", res)
@@ -153,10 +160,8 @@ if not user_pg_df.empty:
 
                 df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto']] = [n_hp, n_mn, n_vg, n_xp, n_lvl, datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
                 conn.update(worksheet='personaggi', data=df_p)
-
                 new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
                 conn.update(worksheet='messaggi', data=new_m)
-                
                 st.cache_data.clear()
                 st.rerun()
             except Exception as e:
