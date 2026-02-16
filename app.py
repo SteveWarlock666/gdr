@@ -21,7 +21,7 @@ if 'auth' not in st.session_state:
     st.session_state.auth = False
 
 if not st.session_state.auth:
-    st.title('📜​ SkyHeaven  -  IA_GDR by SteveWarlock666')
+    st.title('📜​ SkyHeaven  -  IA GDR by SteveWarlock666')
     u = st.text_input('Nome (quello reale per identificarvi')
     p = st.text_input('Password', type='password')
     if st.button('Entra'):
