@@ -9,7 +9,7 @@ import time
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
-# --- CSS COMPLETO (NON SNELLITO) ---
+# --- CSS COMPLETO ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
@@ -32,7 +32,7 @@ if 'GROQ_API_KEY' not in st.secrets:
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
 
-# Refresh a 60s per evitare errore 429 di Google
+# Refresh a 60s
 st_autorefresh(interval=60000, key='global_sync')
 
 if 'auth' not in st.session_state:
@@ -52,29 +52,40 @@ if not st.session_state.auth:
 
 XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
-# --- CARICAMENTO DATI (TTL 10s per cache) ---
+# --- CARICAMENTO DATI ---
 try:
-    df_p = conn.read(worksheet='personaggi', ttl=10).fillna(0)
+    # Carichiamo con header e gestione tipi stringa per evitare 0.0
+    df_p = conn.read(worksheet='personaggi', ttl=10)
     df_m = conn.read(worksheet='messaggi', ttl=10).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=10).fillna('')
     df_n = conn.read(worksheet='nemici', ttl=10).fillna(0)
     
-    # Normalizzazione colonne
-    for col in ['razza', 'classe', 'mana', 'vigore', 'xp', 'lvl', 'ultimo_visto', 'posizione']:
-        if col not in df_p.columns: df_p[col] = 0 if col not in ['razza', 'classe', 'posizione', 'ultimo_visto'] else ''
+    # Pulizia specifica per evitare "0.0" nella posizione
+    if 'posizione' in df_p.columns:
+        df_p['posizione'] = df_p['posizione'].astype(str).replace('0.0', 'Sconosciuto').replace('0', 'Sconosciuto').replace('nan', 'Sconosciuto')
     
+    # Riempimento altri vuoti con 0 solo per numeri
+    cols_num = ['hp', 'mana', 'vigore', 'xp', 'lvl']
+    for c in cols_num:
+        if c in df_p.columns: df_p[c] = pd.to_numeric(df_p[c], errors='coerce').fillna(0)
+    
+    # Riempimento testi
+    cols_text = ['razza', 'classe', 'nome_pg', 'ultimo_visto']
+    for c in cols_text:
+        if c in df_p.columns: df_p[c] = df_p[c].fillna('')
+
     if not df_n.empty:
         df_n['hp'] = pd.to_numeric(df_n['hp'], errors='coerce').fillna(0)
         df_n['posizione'] = df_n['posizione'].astype(str).str.strip()
         df_p['posizione'] = df_p['posizione'].astype(str).str.strip()
 
 except Exception as e:
-    st.warning("Server Google occupati. Attendi 30 secondi e ricarica.")
+    st.warning(f"Caricamento in corso... ({e})")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
 
-# --- CREAZIONE PG (SE MANCA) ---
+# --- CREAZIONE PG ---
 if user_pg_df.empty:
     st.title("🛡️ Crea il tuo Eroe")
     with st.form("creazione_pg"):
@@ -97,12 +108,15 @@ if user_pg_df.empty:
 pg = user_pg_df.iloc[0]
 nome_pg = pg['nome_pg']
 
-# --- CALCOLO LISTE ATTIVI/OFFLINE PER IL MASTER ---
+# LISTE PER IL PROMPT (Blacklist)
+lista_altri_giocatori = [name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg]
+str_blacklist = ", ".join(lista_altri_giocatori)
+
+# Calcolo Attivi/Offline per Sidebar
 attivi = []
 offline = []
 for _, row in df_p.iterrows():
-    if str(row['username']) == str(st.session_state.user):
-        continue # Saltiamo noi stessi
+    if str(row['username']) == str(st.session_state.user): continue
     try:
         last_seen = datetime.strptime(str(row['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
         if datetime.now() - last_seen < timedelta(minutes=10):
@@ -111,9 +125,6 @@ for _, row in df_p.iterrows():
             offline.append(row['nome_pg'])
     except:
         offline.append(row['nome_pg'])
-
-str_attivi = ", ".join(attivi) if attivi else "Nessuno (oltre a te)"
-str_offline = ", ".join(offline) if offline else "Nessuno"
 
 # --- SIDEBAR COMPLETA ---
 with st.sidebar:
@@ -156,12 +167,8 @@ with st.sidebar:
         with st.container(border=True):
             try:
                 uv = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                if datetime.now() - uv < timedelta(minutes=10):
-                    status_icon = "🟢 Online"
-                    status_time = ""
-                else:
-                    status_icon = "🔴 Offline"
-                    status_time = f"Ultimo: {uv.strftime('%H:%M')}"
+                status_icon = "🟢 Online" if datetime.now() - uv < timedelta(minutes=10) else "🔴 Offline"
+                status_time = "" if "Online" in status_icon else f"Ultimo: {uv.strftime('%H:%M')}"
             except:
                 status_icon = "❓"
                 status_time = ""
@@ -190,21 +197,21 @@ if act := st.chat_input('Cosa fai?'):
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            sys_msg = f"""Sei il Master. Giocatore Attuale: {nome_pg}.
+            # PROMPT "MURO DI MATTONI"
+            sys_msg = f"""Sei un MOTORE DI GIOCO NEUTRALE (Master). 
+            Giocatore Attuale: {nome_pg}.
             
-            [STATUS PARTY]
-            ALTRI GIOCATORI ATTIVI (Aspetta la loro risposta): {str_attivi}
-            GIOCATORI OFFLINE (Ignorali): {str_offline}
+            [BLACKLIST - PERSONAGGI VIETATI]
+            Tu NON puoi controllare, né far parlare, né descrivere i pensieri di: {str_blacklist}.
+            Questi sono altri GIOCATORI REALI.
             
-            [REGOLE GESTIONE NPC]
-            1. COERENZA: Non far sparire gli NPC nel nulla. Se il giocatore si allontana, descrivi la reazione dell'NPC.
-            2. PERMANENZA: Gli oggetti e le persone non spariscono appena si cambia paragrafo.
-            
-            [REGOLE GESTIONE GIOCATORI]
-            1. ATTIVI: Non descrivere MAI le loro azioni.
-            2. OFFLINE ({str_offline}): Sono presenti ma passivi. 
-               - NON nominarli continuamente.
-               - NON descrivere cosa fanno/pensano.
+            [REGOLA D'ORO ANTI-PUPPETEERING]
+            Se {nome_pg} parla o interagisce con uno dei nomi nella BLACKLIST:
+            1. TU DEVI FERMARTI.
+            2. Descrivi solo l'ambiente circostante (il vento, la luce, i suoni di fondo).
+            3. Descrivi la reazione generica dell'ambiente, MA NON LA RISPOSTA DEL PERSONAGGIO.
+            Esempio Corretto: "{nome_pg} si rivolge a Kaeryn. Il vento soffia tra gli alberi mentre aspettate una risposta."
+            Esempio SBAGLIATO (VIETATO): "Kaeryn sorride e risponde: 'Certo, andiamo!'" -> QUESTO È VIETATO.
             
             [INFO NEMICI]
             {nemici_presenti}
@@ -213,9 +220,8 @@ if act := st.chat_input('Cosa fai?'):
             1. Attacco: d20 (11-14=1, 15-19=2, 20=3). Abilità: d20 + 1d4.
             2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (descrivi morte e cancella).
             3. XP: Assegna solo se nemico muore.
-            4. NO CALCOLI nel testo.
             
-            TAG OUTPUT (Da usare per i calcoli, NON verranno mostrati al giocatore):
+            TAG OUTPUT (Invisibili al player):
             DANNI_NEMICO: X
             DANNI_RICEVUTI: X
             MANA_USATO: X
@@ -232,6 +238,10 @@ if act := st.chat_input('Cosa fai?'):
             
             v_nem, v_ric, v_mn, v_vg, v_xp_proposed = get_tag("DANNI_NEMICO", res), get_tag("DANNI_RICEVUTI", res), get_tag("MANA_USATO", res), get_tag("VIGORE_USATO", res), get_tag("XP", res)
             
+            # Recupero luogo pulito
+            loc_match = re.search(r"LUOGO:\s*(.+)", res)
+            nuovo_luogo = loc_match.group(1).strip() if loc_match else pg['posizione']
+            
             xp_confermato = 0
             
             # GESTIONE NEMICI
@@ -242,19 +252,18 @@ if act := st.chat_input('Cosa fai?'):
                 if not idx_nem.empty:
                     nuovi_hp = df_n.loc[idx_nem, 'hp'].values[0] - v_nem
                     df_n.loc[idx_nem, 'hp'] = nuovi_hp
-                    
                     if nuovi_hp <= 0:
                         df_n = df_n.drop(idx_nem)
                         xp_confermato = v_xp_proposed
-                    
                     conn.update(worksheet='nemici', data=df_n)
 
-            # Aggiornamento PG
-            df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto']] = [
+            # Aggiornamento PG (incluso il cambio luogo se rilevato)
+            df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto', 'posizione']] = [
                 max(0, int(pg['hp']) - v_ric), 
                 max(0, int(pg['mana']) - v_mn), 
                 max(0, int(pg['vigore']) - v_vg), 
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                nuovo_luogo
             ]
             
             if xp_confermato > 0:
@@ -263,10 +272,8 @@ if act := st.chat_input('Cosa fai?'):
             
             conn.update(worksheet='personaggi', data=df_p)
             
-            # --- PULIZIA OUTPUT (Novità: rimuove i tag prima di salvare) ---
-            testo_pulito = re.sub(r'TAG OUTPUT:[\s\S]*', '', res).strip()
-            # Pulizia extra per sicurezza se il modello dimentica l'header
-            testo_pulito = re.sub(r'(DANNI_NEMICO|DANNI_RICEVUTI|MANA_USATO|VIGORE_USATO|XP|NOME_NEMICO|LUOGO):\s*.*', '', testo_pulito).strip()
+            # PULIZIA OUTPUT
+            testo_pulito = re.sub(r'(TAG OUTPUT:|DANNI_NEMICO:|DANNI_RICEVUTI:|MANA_USATO:|VIGORE_USATO:|XP:|NOME_NEMICO:|LUOGO:).*', '', res, flags=re.DOTALL).strip()
             
             new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_pg, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': testo_pulito}])], ignore_index=True)
             conn.update(worksheet='messaggi', data=new_m)
