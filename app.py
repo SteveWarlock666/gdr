@@ -118,24 +118,23 @@ if not user_pg_df.empty:
         with st.spinner('Il Master narra...'):
             try:
                 storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
-                abi_info = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Dadi: {a['dadi']})" for _, a in mie_abi.iterrows()])
+                abi_info = "\n".join([f"- {a['nome']}: {a['descrizione']} (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
                 
-                sys_msg = f"""Sei un Master dark fantasy. Luogo attuale: {pg['posizione']}. Giocatore: {nome_mio}.
-                REGOLE TASSATIVE:
-                1. MAI descrivere i lanci dei dadi o i calcoli nel testo. Narra solo l'azione.
-                2. DANNI AL NEMICO: Attacco base (costo 1) d20: 11-14=1, 15-19=2, 20=3. Abilità: d20 + 1d4.
-                3. DANNI AL GIOCATORE: Se il nemico colpisce, usa d20 (11-14=1, 15-19=2, 20=3).
-                4. TAG OBBLIGATORI (usali per aggiornare le statistiche):
-                DANNI_NEMICO: X (danni fatti al mostro)
-                DANNI_RICEVUTI: X (danni fatti al giocatore Caelum)
-                MANA_USATO: X (solo se l'abilità è di tipo mana)
-                VIGORE_USATO: X (solo se l'abilità è di tipo vigore o attacco base)
+                sys_msg = f"""Sei il Master di un GDR dark fantasy. Giocatore: {nome_mio}.
+                REGOLE TASSATIVE DI NARRAZIONE:
+                1. Se il nemico colpisce (DANNI_RICEVUTI > 0), DEVI descrivere esplicitamente l'attacco nemico nel testo.
+                2. NON mostrare mai calcoli o dadi nel testo. Narra solo l'esito.
+                3. COSTI: Sottrai Mana SOLO per abilità tipo 'Mana'. Sottrai Vigore per attacchi base o tipo 'Vigore'.
+                TAG OBBLIGATORI (A FINE MESSAGGIO):
+                DANNI_NEMICO: X (danni al mostro)
+                DANNI_RICEVUTI: X (danni al giocatore, max 3)
+                MANA_USATO: X (solo se magia)
+                VIGORE_USATO: X (solo se fisico o base)
                 XP: X (solo se il nemico muore)
-                LUOGO: NomePosizione"""
+                LUOGO: {pg['posizione']}"""
                 
                 res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Contesto: {storia}\nAbilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
                 
-                # Parsing dei tag migliorato
                 def get_tag(tag, text):
                     match = re.search(f"{tag}:\\s*(\\d+)", text)
                     return int(match.group(1)) if match else 0
@@ -145,9 +144,6 @@ if not user_pg_df.empty:
                 val_vg = get_tag("VIGORE_USATO", res)
                 val_xp = get_tag("XP", res)
                 
-                loc_match = re.search(r"LUOGO:\s*([^\n]+)", res)
-                n_loc = loc_match.group(1).strip() if loc_match else pg['posizione']
-                
                 n_hp = max(0, int(pg['hp']) - val_ric)
                 n_mn = max(0, int(pg['mana']) - val_mn)
                 n_vg = max(0, int(pg['vigore']) - val_vg)
@@ -155,11 +151,8 @@ if not user_pg_df.empty:
                 if val_xp > 0:
                     mask = df_p['posizione'] == pg['posizione']
                     df_p.loc[mask, 'xp'] = df_p.loc[mask, 'xp'].astype(int) + val_xp
-                    for idx in df_p[mask].index:
-                        if int(df_p.at[idx, 'xp']) >= XP_LEVELS.get(int(df_p.at[idx, 'lvl']) + 1, 99999):
-                            df_p.at[idx, 'lvl'] = int(df_p.at[idx, 'lvl']) + 1
 
-                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto', 'posizione']] = [n_hp, n_mn, n_vg, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), n_loc]
+                df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto']] = [n_hp, n_mn, n_vg, datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
                 conn.update(worksheet='personaggi', data=df_p)
                 new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_mio, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': res}])], ignore_index=True)
                 conn.update(worksheet='messaggi', data=new_m)
