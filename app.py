@@ -90,7 +90,7 @@ if user_pg_df.empty:
     st.title("🛡️ Crea il tuo Eroe")
     with st.form("creazione_pg"):
         n_nuovo = st.text_input("Nome Eroe")
-        r_nuova = st.selectbox("Razza", ["Primaris", "Feyrin", "Narun", "Minotauro"])
+        r_nuova = st.selectbox("Razza", ["Primaris", "Inferis", "Narun", "Minotauro"])
         c_nuova = st.selectbox("Classe", ["Orrenai", "Elementalista", "Armagister", "Chierico"])
         if st.form_submit_button("Inizia Avventura"):
             nuovo = pd.DataFrame([{
