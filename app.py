@@ -1,6 +1,7 @@
 import streamlit as st
 from groq import Groq
 from streamlit_gsheets import GSheetsConnection
+from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 from datetime import datetime, timedelta
 import re
@@ -32,6 +33,9 @@ if 'GROQ_API_KEY' not in st.secrets:
 
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
+
+# --- REFRESH AUTOMATICO (60 SECONDI) ---
+st_autorefresh(interval=60000, key='global_sync')
 
 if 'auth' not in st.session_state:
     st.session_state.auth = False
@@ -171,48 +175,33 @@ with st.sidebar:
             if status_time: st.caption(status_time)
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
-# --- LOGICA GENERAZIONE IMMAGINE (SEMPLIFICATA E FUNZIONANTE) ---
+# --- LOGICA GENERAZIONE IMMAGINE ---
 curr_pos = str(pg['posizione']).strip()
 last_pos = str(pg['last_pos']).strip()
 
 if curr_pos != last_pos or len(pg['img_luogo']) < 5:
     with st.spinner(f"Il Master sta rivelando {curr_pos}..."):
         try:
-            # 1. COSTRUZIONE LINK DIRETTA (Nessuna AI interemedia = Link Sicuro)
-            # Usiamo un seed basato sul nome del luogo, così è sempre uguale per quel luogo
             seed = int(hashlib.sha256(curr_pos.encode('utf-8')).hexdigest(), 16) % 10**8
-            
-            # Codifichiamo solo il nome del luogo
             safe_place = urllib.parse.quote(curr_pos)
-            
-            # Creiamo l'URL finale
             new_img_url = f"https://image.pollinations.ai/prompt/dark%20fantasy%20scenery%20painting%20{safe_place}?width=1200&height=600&nologo=true&seed={seed}"
             
-            # Aggiornamento DB
             df_p.at[pg_index, 'img_luogo'] = new_img_url
             df_p.at[pg_index, 'last_pos'] = curr_pos
             conn.update(worksheet='personaggi', data=df_p)
             
-            # Messaggio Chat Speciale
             img_msg_text = f"IMG|{curr_pos}|{new_img_url}"
-            
-            new_img_msg = pd.DataFrame([{
-                'data': datetime.now().strftime('%H:%M'),
-                'autore': 'Master',
-                'testo': img_msg_text
-            }])
+            new_img_msg = pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': img_msg_text}])
             df_m = pd.concat([df_m, new_img_msg], ignore_index=True)
             conn.update(worksheet='messaggi', data=df_m)
             
             st.cache_data.clear()
             st.rerun()
-
         except Exception as e:
             st.error(f"Errore generazione ambientazione: {e}")
 
-# --- MOSTRA CHAT (RENDER NATIVO) ---
+# --- MOSTRA CHAT ---
 st.title('📜 Cronaca dell\'Abisso')
-
 for _, r in df_m.tail(20).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
         if str(r['testo']).startswith('IMG|'):
@@ -220,10 +209,7 @@ for _, r in df_m.tail(20).iterrows():
                 parts = str(r['testo']).split('|')
                 if len(parts) >= 3:
                     st.write(f"***Nuova zona scoperta: {parts[1]}***")
-                    # Render nativo Streamlit = Robustezza totale
-                    st.image(parts[2], use_container_width=True) 
-                else:
-                    st.error("Errore formato immagine")
+                    st.image(parts[2], use_container_width=True)
             except:
                 st.error("Immagine non caricabile")
         else:
@@ -234,66 +220,35 @@ if act := st.chat_input('Cosa fai?'):
     with st.spinner('Il Master narra...'):
         try:
             nemici_presenti = df_n[df_n['posizione'] == pg['posizione']]
-            if nemici_presenti.empty:
-                nem_info = "NESSUN NEMICO VISIBILE."
-            else:
-                nem_info = "\n".join([f"- {n['nome_nemico']}: {int(n['hp'])} HP" for _, n in nemici_presenti.iterrows()])
-            
+            nem_info = "NESSUN NEMICO VISIBILE." if nemici_presenti.empty else "\n".join([f"- {n['nome_nemico']}: {int(n['hp'])} HP" for _, n in nemici_presenti.iterrows()])
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
-            
             lista_altri = [name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg]
             str_blacklist = ", ".join(lista_altri)
 
-            # PROMPT CON SEPARATORE NETTO
-            sys_msg = f"""Sei un MOTORE DI GIOCO NEUTRALE (Master). 
-            Giocatore Attuale: {nome_pg}.
-            
-            [BLACKLIST]
-            NON controllare: {str_blacklist}. Se interagisce con loro, fermati.
-            
-            [INFO NEMICI]
-            {nemici_presenti}
-            
-            [ISTRUZIONI DI OUTPUT - FONDAMENTALE]
-            1. Scrivi PRIMA la narrazione della storia.
-            2. POI scrivi ESATTAMENTE questa stringa separatrice: ///DATI///
-            3. SOTTO il separatore, scrivi i dati tecnici.
-            
-            Esempio:
-            Il vento soffia tra gli alberi. Non succede nulla.
-            ///DATI///
-            DANNI_NEMICO: 0
-            DANNI_RICEVUTI: 0
-            MANA_USATO: 0
-            VIGORE_USATO: 0
-            XP: 0
-            NOME_NEMICO: Nessuno
-            LUOGO: {pg['posizione']}
+            sys_msg = f"""Sei un MOTORE DI GIOCO NEUTRALE (Master). Giocatore Attuale: {nome_pg}.
+            [BLACKLIST] NON controllare: {str_blacklist}. Se interagisce con loro, fermati.
+            [INFO NEMICI] {nemici_presenti}
+            [ISTRUZIONI DI OUTPUT]
+            1. Scrivi PRIMA la narrazione.
+            2. POI scrivi: ///DATI///
+            3. SOTTO il separatore:
+            DANNI_NEMICO: X, DANNI_RICEVUTI: X, MANA_USATO: X, VIGORE_USATO: X, XP: X, NOME_NEMICO: nome, LUOGO: {pg['posizione']}
             """
             
             res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Abilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
             
-            # --- PARSING ROBUSTO CON SEPARATORE ---
             parts = res.split('///DATI///')
-            testo_pulito = parts[0].strip() # La storia è tutto ciò che c'è prima
-            
-            dati_tecnici = parts[1] if len(parts) > 1 else "" # I dati sono dopo
+            testo_pulito = parts[0].strip()
+            dati_tecnici = parts[1] if len(parts) > 1 else ""
             
             def get_tag(tag, text):
                 match = re.search(f"{tag}:\\s*(\\d+)", text)
                 return int(match.group(1)) if match else 0
             
-            # Leggiamo i tag SOLO dalla parte tecnica
-            v_nem = get_tag("DANNI_NEMICO", dati_tecnici)
-            v_ric = get_tag("DANNI_RICEVUTI", dati_tecnici)
-            v_mn = get_tag("MANA_USATO", dati_tecnici)
-            v_vg = get_tag("VIGORE_USATO", dati_tecnici)
-            v_xp_proposed = get_tag("XP", dati_tecnici)
-            
+            v_nem, v_ric, v_mn, v_vg, v_xp_proposed = get_tag("DANNI_NEMICO", dati_tecnici), get_tag("DANNI_RICEVUTI", dati_tecnici), get_tag("MANA_USATO", dati_tecnici), get_tag("VIGORE_USATO", dati_tecnici), get_tag("XP", dati_tecnici)
             loc_match = re.search(r"LUOGO:\s*(.+)", dati_tecnici)
             nuovo_luogo = loc_match.group(1).strip() if loc_match else pg['posizione']
             
-            # LOGICA DI GIOCO (Update DB)
             xp_confermato = 0
             t_match = re.search(r"NOME_NEMICO:\s*([^\n,]+)", dati_tecnici)
             if t_match and v_nem > 0:
@@ -303,8 +258,7 @@ if act := st.chat_input('Cosa fai?'):
                     nuovi_hp = df_n.loc[idx_nem, 'hp'].values[0] - v_nem
                     df_n.loc[idx_nem, 'hp'] = nuovi_hp
                     if nuovi_hp <= 0:
-                        df_n = df_n.drop(idx_nem)
-                        xp_confermato = v_xp_proposed
+                        df_n = df_n.drop(idx_nem); xp_confermato = v_xp_proposed
                     conn.update(worksheet='nemici', data=df_n)
 
             df_p.at[pg_index, 'hp'] = max(0, int(pg['hp']) - v_ric)
@@ -312,14 +266,9 @@ if act := st.chat_input('Cosa fai?'):
             df_p.at[pg_index, 'vigore'] = max(0, int(pg['vigore']) - v_vg)
             df_p.at[pg_index, 'ultimo_visto'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             df_p.at[pg_index, 'posizione'] = nuovo_luogo 
-            
-            if xp_confermato > 0:
-                mask_gruppo = df_p['posizione'] == pg['posizione']
-                df_p.loc[mask_gruppo, 'xp'] += xp_confermato
+            if xp_confermato > 0: df_p.loc[df_p['posizione'] == pg['posizione'], 'xp'] += xp_confermato
             
             conn.update(worksheet='personaggi', data=df_p)
-            
-            # Salvataggio Messaggio PULITO (senza dati)
             new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_pg, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': testo_pulito}])], ignore_index=True)
             conn.update(worksheet='messaggi', data=new_m)
             
