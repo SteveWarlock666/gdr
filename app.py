@@ -22,7 +22,6 @@ st.markdown("""
     #stamina-bar .stProgress div[role="progressbar"] > div { background-color: #00ff88 !important; }
     #xp-bar .stProgress div[role="progressbar"] > div { background-color: #ffffff !important; }
     div[data-testid="stVerticalBlock"] > div { padding-bottom: 0px !important; margin-bottom: 0px !important; }
-    img.stImage { border-radius: 10px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -171,26 +170,30 @@ with st.sidebar:
             if status_time: st.caption(status_time)
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
-# --- LOGICA IMMAGINE IN CHAT ---
+# --- LOGICA GENERAZIONE IMMAGINE (FIX SICUREZZA) ---
 curr_pos = str(pg['posizione']).strip()
 last_pos = str(pg['last_pos']).strip()
 
 if curr_pos != last_pos or len(pg['img_luogo']) < 5:
     with st.spinner(f"Il Master sta rivelando {curr_pos}..."):
         try:
+            # 1. Genera descrizione
             prompt_request = f"Create a short, vivid, dark fantasy visual description (max 15 words) for a place called: '{curr_pos}'. Focus on atmosphere, lighting and colors. No intro."
             vis_desc = client.chat.completions.create(messages=[{"role": "user", "content": prompt_request}], model="llama-3.3-70b-versatile").choices[0].message.content
             
-            # Pulizia e Encoding URL per evitare link rotti
-            safe_desc = urllib.parse.quote(vis_desc.strip())
+            # 2. PULIZIA AGGRESSIVA (Rimuove caratteri strani che rompono i link)
+            clean_desc = re.sub(r'[^a-zA-Z0-9\s]', '', vis_desc).strip()
+            safe_desc = urllib.parse.quote(clean_desc)
+            
+            # 3. URL Definitivo
             new_img_url = f"https://image.pollinations.ai/prompt/{safe_desc}?width=1200&height=600&nologo=true&seed={int(time.time())}"
             
             df_p.at[pg_index, 'img_luogo'] = new_img_url
             df_p.at[pg_index, 'last_pos'] = curr_pos
             conn.update(worksheet='personaggi', data=df_p)
             
-            # USA HTML INVECE DI MARKDOWN PER SICUREZZA
-            img_msg_text = f"***\nNuova zona scoperta: {curr_pos}\n***\n<img src='{new_img_url}' width='100%' style='border-radius:10px; margin-top:10px;'/>"
+            # 4. SALVATAGGIO FORMATO SPECIALE "IMG|"
+            img_msg_text = f"IMG|{curr_pos}|{new_img_url}"
             
             new_img_msg = pd.DataFrame([{
                 'data': datetime.now().strftime('%H:%M'),
@@ -206,13 +209,26 @@ if curr_pos != last_pos or len(pg['img_luogo']) < 5:
         except Exception as e:
             st.error(f"Errore generazione ambientazione: {e}")
 
-# --- MOSTRA CHAT ---
+# --- MOSTRA CHAT (RENDER NATIVO) ---
 st.title('📜 Cronaca dell\'Abisso')
 
 for _, r in df_m.tail(20).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
-        # ABILITA HTML PER VEDERE LE IMMAGINI
-        st.markdown(r['testo'], unsafe_allow_html=True)
+        # Controlla se è un messaggio speciale immagine (IMG|)
+        if str(r['testo']).startswith('IMG|'):
+            try:
+                parts = str(r['testo']).split('|')
+                # parts[1] è il nome del luogo, parts[2] è l'URL
+                if len(parts) >= 3:
+                    st.write(f"***Nuova zona scoperta: {parts[1]}***")
+                    st.image(parts[2], use_container_width=True)
+                else:
+                    st.error("Errore formato immagine")
+            except:
+                st.error("Immagine non caricabile")
+        else:
+            # Messaggio normale (usa html per compatibilità vecchi messaggi)
+            st.markdown(r['testo'], unsafe_allow_html=True)
 
 # --- INPUT E LOGICA MASTER ---
 if act := st.chat_input('Cosa fai?'):
