@@ -1,7 +1,6 @@
 import streamlit as st
 from groq import Groq
 from streamlit_gsheets import GSheetsConnection
-from streamlit_autorefresh import st_autorefresh
 import pandas as pd
 from datetime import datetime, timedelta
 import re
@@ -33,9 +32,6 @@ if 'GROQ_API_KEY' not in st.secrets:
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
 
-# Refresh per UptimeRobot e sync
-st_autorefresh(interval=60000, key='global_sync')
-
 if 'auth' not in st.session_state:
     st.session_state.auth = False
 
@@ -55,7 +51,8 @@ XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
 # --- CARICAMENTO DATI ---
 try:
-    df_p = conn.read(worksheet='personaggi', ttl=0) # ttl=0 forza la lettura fresca
+    # ttl=0 forza la lettura fresca da Google Sheets ad ogni interazione
+    df_p = conn.read(worksheet='personaggi', ttl=0)
     df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
     df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
     df_n = conn.read(worksheet='nemici', ttl=0).fillna(0)
@@ -69,8 +66,7 @@ try:
     for c in cols_num:
         if c in df_p.columns: df_p[c] = pd.to_numeric(df_p[c], errors='coerce').fillna(0)
     
-    # Pulizia Testi e Nuove Colonne (FORZATURA)
-    # Se le colonne non esistono nel foglio, le creiamo in memoria per non far crashare
+    # Pulizia Testi e Colonne
     cols_text = ['razza', 'classe', 'nome_pg', 'ultimo_visto', 'img', 'img_luogo', 'last_pos']
     for c in cols_text:
         if c not in df_p.columns: 
@@ -83,7 +79,7 @@ try:
         df_p['posizione'] = df_p['posizione'].astype(str).str.strip()
 
 except Exception as e:
-    st.warning(f"Errore caricamento (Controlla le colonne su Sheets): {e}")
+    st.warning(f"Errore caricamento dati: {e}")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
@@ -95,7 +91,7 @@ if user_pg_df.empty:
         n_nuovo = st.text_input("Nome Eroe")
         r_nuova = st.selectbox("Razza", ["Primaris", "Inferis", "Narun", "Minotauro"])
         c_nuova = st.selectbox("Classe", ["Orrenai", "Elementalista", "Armagister", "Chierico"])
-        img_nuova = st.text_input("URL Immagine Profilo (.jpg/.png)")
+        img_nuova = st.text_input("URL Immagine Profilo (.jpg/.png) - Opzionale")
         
         if st.form_submit_button("Inizia Avventura"):
             nuovo = pd.DataFrame([{
@@ -113,7 +109,7 @@ if user_pg_df.empty:
             st.rerun()
     st.stop()
 
-# Recupero Indice del Giocatore (per aggiornamenti diretti)
+# Recupero Indice del Giocatore Corrente
 pg_index = user_pg_df.index[0]
 pg = df_p.loc[pg_index]
 nome_pg = pg['nome_pg']
@@ -122,12 +118,12 @@ nome_pg = pg['nome_pg']
 with st.sidebar:
     st.header('🛡️ SCHEDA EROE')
     
-    # 1. VISUALIZZAZIONE AVATAR (Fixato)
-    if len(pg['img']) > 5: # Se c'è un link valido
+    # 1. AVATAR PROFILO
+    if len(pg['img']) > 5:
         try:
             st.image(pg['img'], use_container_width=True)
         except:
-            st.error("Link immagine non valido")
+            st.error("Link immagine errato")
     
     with st.container(border=True):
         st.markdown(f"**{nome_pg} (Lv. {int(pg['lvl'])})**")
@@ -153,35 +149,54 @@ with st.sidebar:
         st.progress(max(0.0, min(1.0, cur_xp / next_xp)))
         st.markdown('</div>', unsafe_allow_html=True)
 
+    st.write("📜 Abilità:")
+    mie_abi = df_a[df_a['proprietario'] == nome_pg]
+    for _, a in mie_abi.iterrows():
+        with st.container(border=True):
+            st.markdown(f"<p style='font-size:12px; margin:0;'>**{a['nome']}**</p>", unsafe_allow_html=True)
+            st.caption(f"{a['tipo']} • Costo: {a['costo']}")
+
+    st.divider()
     st.write("👥 Compagni:")
     compagni = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
     for _, c in compagni.iterrows():
         with st.container(border=True):
-            st.markdown(f"**{c['nome_pg']}**")
-            st.caption(f"{c['razza']} {c['classe']}")
+            # LOGICA ONLINE/OFFLINE
+            try:
+                uv = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
+                # Se visto negli ultimi 10 minuti -> Online
+                if datetime.now() - uv < timedelta(minutes=10):
+                    status_icon = "🟢 Online"
+                    status_time = ""
+                else:
+                    status_icon = "🔴 Offline"
+                    status_time = f"Ultimo: {uv.strftime('%H:%M')}"
+            except:
+                status_icon = "❓"
+                status_time = ""
+            
+            st.markdown(f"**{c['nome_pg']}** {status_icon}")
+            st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
+            if status_time: st.caption(status_time)
+            st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 # --- LOGICA IMMAGINE AMBIENTAZIONE (STABILE) ---
-# Se il luogo attuale è diverso dall'ultimo salvato (last_pos), generiamo nuova immagine
 curr_pos = str(pg['posizione']).strip()
 last_pos = str(pg['last_pos']).strip()
 
 if curr_pos != last_pos or len(pg['img_luogo']) < 5:
     with st.spinner(f"Groq sta dipingendo {curr_pos}..."):
         try:
-            # 1. Groq crea il prompt visivo
             prompt_request = f"Create a short, vivid, dark fantasy visual description (max 15 words) for a place called: '{curr_pos}'. Focus on atmosphere, lighting and colors. No intro, just the visual description."
             vis_desc = client.chat.completions.create(messages=[{"role": "user", "content": prompt_request}], model="llama-3.3-70b-versatile").choices[0].message.content
             
-            # 2. Pulizia prompt per URL
             safe_desc = urllib.parse.quote(vis_desc)
             new_img_url = f"https://image.pollinations.ai/prompt/{safe_desc}?width=1200&height=500&nologo=true&seed={int(time.time())}"
             
-            # 3. Aggiornamento Database
             df_p.at[pg_index, 'img_luogo'] = new_img_url
             df_p.at[pg_index, 'last_pos'] = curr_pos
             conn.update(worksheet='personaggi', data=df_p)
             
-            # Aggiorna variabile locale per visualizzazione immediata
             pg['img_luogo'] = new_img_url
         except Exception as e:
             st.error(f"Errore generazione ambientazione: {e}")
@@ -200,7 +215,6 @@ for _, r in df_m.tail(15).iterrows():
 if act := st.chat_input('Cosa fai?'):
     with st.spinner('Il Master narra...'):
         try:
-            # Recupero dati aggiornati per il prompt
             nemici_presenti = df_n[df_n['posizione'] == pg['posizione']]
             if nemici_presenti.empty:
                 nem_info = "NESSUN NEMICO VISIBILE."
@@ -213,21 +227,29 @@ if act := st.chat_input('Cosa fai?'):
             lista_altri = [name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg]
             str_blacklist = ", ".join(lista_altri)
 
-            sys_msg = f"""Sei il Master. Giocatore: {nome_pg}.
+            # PROMPT DI SISTEMA
+            sys_msg = f"""Sei un MOTORE DI GIOCO NEUTRALE (Master). 
+            Giocatore Attuale: {nome_pg}.
             
-            [BLACKLIST UMANA]
-            Non controllare MAI: {str_blacklist}. Sono giocatori reali.
-            Se {nome_pg} parla a loro, descrivi l'ambiente e fermati.
+            [BLACKLIST - PERSONAGGI VIETATI]
+            Tu NON puoi controllare, né far parlare, né descrivere i pensieri di: {str_blacklist}.
+            Questi sono altri GIOCATORI REALI.
+            
+            [REGOLA D'ORO ANTI-PUPPETEERING]
+            Se {nome_pg} parla o interagisce con uno dei nomi nella BLACKLIST:
+            1. TU DEVI FERMARTI.
+            2. Descrivi solo l'ambiente circostante (il vento, la luce, i suoni di fondo).
+            3. Descrivi la reazione generica dell'ambiente, MA NON LA RISPOSTA DEL PERSONAGGIO.
             
             [INFO NEMICI]
             {nemici_presenti}
             
-            [REGOLE]
-            1. Attacco: d20 (11-14=1, 15-19=2, 20=3).
-            2. Se Nemico muore, descrivilo.
-            3. Se il giocatore cambia luogo, aggiorna il tag LUOGO.
+            REGOLE MECCANICHE:
+            1. Attacco: d20 (11-14=1, 15-19=2, 20=3). Abilità: d20 + 1d4.
+            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (descrivi morte e cancella).
+            3. XP: Assegna solo se nemico muore.
             
-            TAG OUTPUT:
+            TAG OUTPUT (Invisibili al player):
             DANNI_NEMICO: X
             DANNI_RICEVUTI: X
             MANA_USATO: X
@@ -263,12 +285,12 @@ if act := st.chat_input('Cosa fai?'):
                         xp_confermato = v_xp_proposed
                     conn.update(worksheet='nemici', data=df_n)
 
-            # Aggiornamento PG (HP, Mana, Posizione)
+            # Aggiornamento PG
             df_p.at[pg_index, 'hp'] = max(0, int(pg['hp']) - v_ric)
             df_p.at[pg_index, 'mana'] = max(0, int(pg['mana']) - v_mn)
             df_p.at[pg_index, 'vigore'] = max(0, int(pg['vigore']) - v_vg)
             df_p.at[pg_index, 'ultimo_visto'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            df_p.at[pg_index, 'posizione'] = nuovo_luogo # Se è cambiato, al prossimo refresh l'immagine si aggiornerà
+            df_p.at[pg_index, 'posizione'] = nuovo_luogo 
             
             if xp_confermato > 0:
                 mask_gruppo = df_p['posizione'] == pg['posizione']
