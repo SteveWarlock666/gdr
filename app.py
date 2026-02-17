@@ -127,22 +127,19 @@ with st.sidebar:
 
     st.divider()
     st.write("👥 Compagni:")
-    comp = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
-    for _, c in comp.iterrows():
+    compagni = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
+    for _, c in compagni.iterrows():
         with st.container(border=True):
             try:
                 uv = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                if datetime.now() - uv < timedelta(minutes=10):
-                    st_icon = "🟢"
-                    st_time = "Online"
-                else:
-                    st_icon = "🔴"
-                    st_time = f"Visto: {uv.strftime('%H:%M')}"
-            except: 
-                st_icon = "❓"
-                st_time = "Sconosciuto"
-            st.markdown(f"{st_icon} **{c['nome_pg']}**")
-            st.caption(f"Status: {st_time}")
+                status_icon = "🟢 Online" if datetime.now() - uv < timedelta(minutes=10) else "🔴 Offline"
+                status_time = "" if "Online" in status_icon else f"Ultimo: {uv.strftime('%H:%M')}"
+            except:
+                status_icon = "❓"
+                status_time = ""
+            st.markdown(f"**{c['nome_pg']}** {status_icon}")
+            st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
+            if status_time: st.caption(status_time)
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 # --- LOGICA IMMAGINE AMBIENTE ---
