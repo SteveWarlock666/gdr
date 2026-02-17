@@ -17,7 +17,7 @@ st.markdown("""
     .stApp { background-color: #0e1117; }
     div[data-testid="stSidebarUserContent"] { padding-top: 1rem; }
     .compact-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-    .compact-label { font-size: 12px !important; min-width: 75px; margin: 0 !important; white-space: nowrap; }
+    .compact-label { font-size: 12px !important; min-width: 85px; margin: 0 !important; white-space: nowrap; }
     .stProgress { height: 6px !important; flex-grow: 1; }
     #hp-bar .stProgress div[role="progressbar"] > div { background-color: #ff4b4b !important; }
     #mana-bar .stProgress div[role="progressbar"] > div { background-color: #00f2ff !important; }
@@ -28,7 +28,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if 'GROQ_API_KEY' not in st.secrets:
-    st.error("Chiave mancante")
+    st.error("Chiave API mancante nei Secrets!")
     st.stop()
 
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
@@ -42,7 +42,7 @@ if 'auth' not in st.session_state:
 
 # --- LOGIN ---
 if not st.session_state.auth:
-    st.title('APOCRYPHA')
+    st.title('🌑 APOCRYPHA')
     u = st.text_input('Username')
     p = st.text_input('Password', type='password')
     if st.button('Entra'):
@@ -70,18 +70,18 @@ try:
         if c not in df_p.columns: df_p[c] = ''
     df_p = df_p.fillna('')
 except:
-    st.warning("Sincronizzazione")
+    st.warning("Sincronizzazione database in corso...")
     st.stop()
 
 u_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
 
 if u_df.empty:
-    st.title("Crea il tuo Eroe")
+    st.title("🛡️ Crea il tuo Eroe")
     with st.form("creazione_pg"):
         n_nuovo = st.text_input("Nome Eroe")
         r_nuova = st.selectbox("Razza", ["Primaris", "Inferis", "Narun", "Minotauro"])
         c_nuova = st.selectbox("Classe", ["Orrenai", "Elementalista", "Armagister", "Chierico"])
-        img_nuova = st.text_input("URL Avatar")
+        img_nuova = st.text_input("URL Avatar (.jpg/.png)")
         if st.form_submit_button("Inizia"):
             nuovo = pd.DataFrame([{"username": st.session_state.user, "nome_pg": n_nuovo, "razza": r_nuova, "classe": c_nuova, "hp": 20, "mana": 20, "vigore": 20, "xp": 0, "lvl": 1, "posizione": "Strada per Gauvadon", "img": img_nuova, "img_luogo": "", "last_pos": "", "ultimo_visto": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}])
             conn.update(worksheet='personaggi', data=pd.concat([df_p, nuovo], ignore_index=True))
@@ -92,49 +92,57 @@ pg_idx = u_df.index[0]
 pg = df_p.loc[pg_idx]
 nome_pg = pg['nome_pg']
 
-# --- SIDEBAR (Status Completo) ---
+# --- SIDEBAR (Status Completo con Icone) ---
 with st.sidebar:
-    st.header('SCHEDA EROE')
+    st.header('🛡️ SCHEDA EROE')
     if len(str(pg['img'])) > 5: st.image(pg['img'], use_container_width=True)
     with st.container(border=True):
-        st.markdown(f"**{nome_pg}** Lv. {int(pg['lvl'])}")
-        st.caption(f"Posizione: {pg['posizione']}")
+        st.markdown(f"**{nome_pg}** (Lv. {int(pg['lvl'])})")
+        st.caption(f"📍 {pg['posizione']}")
         
-        st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
+        st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">❤️ HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
         st.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
         st.markdown('</div>', unsafe_allow_html=True)
         
-        st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True)
+        st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">✨ MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True)
         st.progress(max(0.0, min(1.0, int(pg['mana']) / 20)))
         st.markdown('</div>', unsafe_allow_html=True)
         
-        st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True)
+        st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">⚡ VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True)
         st.progress(max(0.0, min(1.0, int(pg["vigore"]) / 20)))
         st.markdown('</div>', unsafe_allow_html=True)
         
         st.divider()
         cur_xp, nxt_xp = int(pg['xp']), XP_LEVELS.get(int(pg['lvl']) + 1, 99999)
-        st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">XP: {cur_xp}/{nxt_xp}</p>', unsafe_allow_html=True)
+        st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">📖 XP: {cur_xp}/{nxt_xp}</p>', unsafe_allow_html=True)
         st.progress(max(0.0, min(1.0, cur_xp / nxt_xp)))
         st.markdown('</div>', unsafe_allow_html=True)
 
-    st.write("Abilita:")
+    st.write("📜 Abilità:")
     m_a = df_a[df_a['proprietario'] == nome_pg]
     for _, a in m_a.iterrows():
         with st.container(border=True):
             st.markdown(f"**{a['nome']}**")
-            st.caption(f"{a['tipo']} Costo: {a['costo']}")
+            st.caption(f"{a['tipo']} • Costo: {a['costo']}")
 
     st.divider()
-    st.write("Compagni:")
+    st.write("👥 Compagni:")
     comp = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
     for _, c in comp.iterrows():
         with st.container(border=True):
             try:
                 uv = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                st_txt = "Online" if datetime.now() - uv < timedelta(minutes=10) else "Offline"
-            except: st_txt = "Unknown"
-            st.markdown(f"**{c['nome_pg']}** Status: {st_txt}")
+                if datetime.now() - uv < timedelta(minutes=10):
+                    st_icon = "🟢"
+                    st_time = "Online"
+                else:
+                    st_icon = "🔴"
+                    st_time = f"Visto: {uv.strftime('%H:%M')}"
+            except: 
+                st_icon = "❓"
+                st_time = "Sconosciuto"
+            st.markdown(f"{st_icon} **{c['nome_pg']}**")
+            st.caption(f"Status: {st_time}")
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 # --- LOGICA IMMAGINE AMBIENTE ---
@@ -152,7 +160,7 @@ if curr_pos != str(pg['last_pos']).strip():
     st.rerun()
 
 # --- CHAT UI ---
-st.title('Cronaca dell Abisso')
+st.title('📜 Cronaca dell\'Abisso')
 for _, r in df_m.tail(25).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
         if str(r['testo']).startswith('IMG|'):
@@ -197,4 +205,4 @@ if act := st.chat_input('Cosa fai?'):
             conn.update(worksheet='messaggi', data=new_m)
             st.cache_data.clear()
             st.rerun()
-        except: st.error("Errore Master")
+        except: st.error("Errore di connessione con il Master")
