@@ -6,6 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import re
 import time
+import urllib.parse
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
@@ -32,7 +33,7 @@ if 'GROQ_API_KEY' not in st.secrets:
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
 
-# Refresh a 60s
+# Refresh per UptimeRobot e sync
 st_autorefresh(interval=60000, key='global_sync')
 
 if 'auth' not in st.session_state:
@@ -54,25 +55,27 @@ XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
 # --- CARICAMENTO DATI ---
 try:
-    # Carichiamo con header e gestione tipi stringa per evitare 0.0
-    df_p = conn.read(worksheet='personaggi', ttl=10)
-    df_m = conn.read(worksheet='messaggi', ttl=10).fillna('')
-    df_a = conn.read(worksheet='abilita', ttl=10).fillna('')
-    df_n = conn.read(worksheet='nemici', ttl=10).fillna(0)
+    df_p = conn.read(worksheet='personaggi', ttl=0) # ttl=0 forza la lettura fresca
+    df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
+    df_a = conn.read(worksheet='abilita', ttl=0).fillna('')
+    df_n = conn.read(worksheet='nemici', ttl=0).fillna(0)
     
-    # Pulizia specifica per evitare "0.0" nella posizione
+    # Pulizia Posizione
     if 'posizione' in df_p.columns:
         df_p['posizione'] = df_p['posizione'].astype(str).replace('0.0', 'Sconosciuto').replace('0', 'Sconosciuto').replace('nan', 'Sconosciuto')
     
-    # Riempimento altri vuoti con 0 solo per numeri
+    # Pulizia Numeri
     cols_num = ['hp', 'mana', 'vigore', 'xp', 'lvl']
     for c in cols_num:
         if c in df_p.columns: df_p[c] = pd.to_numeric(df_p[c], errors='coerce').fillna(0)
     
-    # Riempimento testi
-    cols_text = ['razza', 'classe', 'nome_pg', 'ultimo_visto']
+    # Pulizia Testi e Nuove Colonne (FORZATURA)
+    # Se le colonne non esistono nel foglio, le creiamo in memoria per non far crashare
+    cols_text = ['razza', 'classe', 'nome_pg', 'ultimo_visto', 'img', 'img_luogo', 'last_pos']
     for c in cols_text:
-        if c in df_p.columns: df_p[c] = df_p[c].fillna('')
+        if c not in df_p.columns: 
+            df_p[c] = ''
+        df_p[c] = df_p[c].fillna('').astype(str)
 
     if not df_n.empty:
         df_n['hp'] = pd.to_numeric(df_n['hp'], errors='coerce').fillna(0)
@@ -80,7 +83,7 @@ try:
         df_p['posizione'] = df_p['posizione'].astype(str).str.strip()
 
 except Exception as e:
-    st.warning(f"Caricamento in corso... ({e})")
+    st.warning(f"Errore caricamento (Controlla le colonne su Sheets): {e}")
     st.stop()
 
 user_pg_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
@@ -92,12 +95,17 @@ if user_pg_df.empty:
         n_nuovo = st.text_input("Nome Eroe")
         r_nuova = st.selectbox("Razza", ["Primaris", "Inferis", "Narun", "Minotauro"])
         c_nuova = st.selectbox("Classe", ["Orrenai", "Elementalista", "Armagister", "Chierico"])
+        img_nuova = st.text_input("URL Immagine Profilo (.jpg/.png)")
+        
         if st.form_submit_button("Inizia Avventura"):
             nuovo = pd.DataFrame([{
                 "username": st.session_state.user, "nome_pg": n_nuovo, 
                 "razza": r_nuova, "classe": c_nuova, 
                 "hp": 20, "mana": 20, "vigore": 20, "xp": 0, "lvl": 1, 
                 "posizione": "Strada per Gauvadon", 
+                "img": img_nuova,
+                "img_luogo": "",
+                "last_pos": "Strada per Gauvadon",
                 "ultimo_visto": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }])
             df_p = pd.concat([df_p, nuovo], ignore_index=True)
@@ -105,30 +113,22 @@ if user_pg_df.empty:
             st.rerun()
     st.stop()
 
-pg = user_pg_df.iloc[0]
+# Recupero Indice del Giocatore (per aggiornamenti diretti)
+pg_index = user_pg_df.index[0]
+pg = df_p.loc[pg_index]
 nome_pg = pg['nome_pg']
-
-# LISTE PER IL PROMPT (Blacklist)
-lista_altri_giocatori = [name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg]
-str_blacklist = ", ".join(lista_altri_giocatori)
-
-# Calcolo Attivi/Offline per Sidebar
-attivi = []
-offline = []
-for _, row in df_p.iterrows():
-    if str(row['username']) == str(st.session_state.user): continue
-    try:
-        last_seen = datetime.strptime(str(row['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-        if datetime.now() - last_seen < timedelta(minutes=10):
-            attivi.append(row['nome_pg'])
-        else:
-            offline.append(row['nome_pg'])
-    except:
-        offline.append(row['nome_pg'])
 
 # --- SIDEBAR COMPLETA ---
 with st.sidebar:
     st.header('🛡️ SCHEDA EROE')
+    
+    # 1. VISUALIZZAZIONE AVATAR (Fixato)
+    if len(pg['img']) > 5: # Se c'è un link valido
+        try:
+            st.image(pg['img'], use_container_width=True)
+        except:
+            st.error("Link immagine non valido")
+    
     with st.container(border=True):
         st.markdown(f"**{nome_pg} (Lv. {int(pg['lvl'])})**")
         st.caption(f"📍 {pg['posizione']}")
@@ -152,76 +152,82 @@ with st.sidebar:
         st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">📖 XP: {cur_xp}/{next_xp}</p>', unsafe_allow_html=True)
         st.progress(max(0.0, min(1.0, cur_xp / next_xp)))
         st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.write("📜 Abilità:")
-    mie_abi = df_a[df_a['proprietario'] == nome_pg]
-    for _, a in mie_abi.iterrows():
-        with st.container(border=True):
-            st.markdown(f"<p style='font-size:12px; margin:0;'>**{a['nome']}**</p>", unsafe_allow_html=True)
-            st.caption(f"{a['tipo']} • Costo: {a['costo']}")
 
-    st.divider()
     st.write("👥 Compagni:")
     compagni = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
     for _, c in compagni.iterrows():
         with st.container(border=True):
-            try:
-                uv = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                status_icon = "🟢 Online" if datetime.now() - uv < timedelta(minutes=10) else "🔴 Offline"
-                status_time = "" if "Online" in status_icon else f"Ultimo: {uv.strftime('%H:%M')}"
-            except:
-                status_icon = "❓"
-                status_time = ""
-            st.markdown(f"**{c['nome_pg']}** {status_icon}")
-            st.caption(f"Liv. {int(c['lvl'])} • {c['razza']} {c['classe']}")
-            if status_time: st.caption(status_time)
-            st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
+            st.markdown(f"**{c['nome_pg']}**")
+            st.caption(f"{c['razza']} {c['classe']}")
 
-# --- CHAT UI ---
+# --- LOGICA IMMAGINE AMBIENTAZIONE (STABILE) ---
+# Se il luogo attuale è diverso dall'ultimo salvato (last_pos), generiamo nuova immagine
+curr_pos = str(pg['posizione']).strip()
+last_pos = str(pg['last_pos']).strip()
+
+if curr_pos != last_pos or len(pg['img_luogo']) < 5:
+    with st.spinner(f"Groq sta dipingendo {curr_pos}..."):
+        try:
+            # 1. Groq crea il prompt visivo
+            prompt_request = f"Create a short, vivid, dark fantasy visual description (max 15 words) for a place called: '{curr_pos}'. Focus on atmosphere, lighting and colors. No intro, just the visual description."
+            vis_desc = client.chat.completions.create(messages=[{"role": "user", "content": prompt_request}], model="llama-3.3-70b-versatile").choices[0].message.content
+            
+            # 2. Pulizia prompt per URL
+            safe_desc = urllib.parse.quote(vis_desc)
+            new_img_url = f"https://image.pollinations.ai/prompt/{safe_desc}?width=1200&height=500&nologo=true&seed={int(time.time())}"
+            
+            # 3. Aggiornamento Database
+            df_p.at[pg_index, 'img_luogo'] = new_img_url
+            df_p.at[pg_index, 'last_pos'] = curr_pos
+            conn.update(worksheet='personaggi', data=df_p)
+            
+            # Aggiorna variabile locale per visualizzazione immediata
+            pg['img_luogo'] = new_img_url
+        except Exception as e:
+            st.error(f"Errore generazione ambientazione: {e}")
+
+# MOSTRA AMBIENTAZIONE
 st.title('📜 Cronaca dell\'Abisso')
+if len(pg['img_luogo']) > 5:
+    st.image(pg['img_luogo'], caption=f"{pg['posizione']}", use_container_width=True)
+
+# --- CHAT ---
 for _, r in df_m.tail(15).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
         st.write(f"**{r['autore']}**: {r['testo']}")
 
-# --- LOGICA MASTER ---
+# --- INPUT E LOGICA MASTER ---
 if act := st.chat_input('Cosa fai?'):
     with st.spinner('Il Master narra...'):
         try:
-            storia = "\n".join([f"{r['autore']}: {r['testo']}" for _, r in df_m.tail(5).iterrows()])
-            
+            # Recupero dati aggiornati per il prompt
             nemici_presenti = df_n[df_n['posizione'] == pg['posizione']]
             if nemici_presenti.empty:
-                nem_info = "NESSUN NEMICO VISIBILE (Non inventarne)."
+                nem_info = "NESSUN NEMICO VISIBILE."
             else:
                 nem_info = "\n".join([f"- {n['nome_nemico']}: {int(n['hp'])} HP" for _, n in nemici_presenti.iterrows()])
             
             abi_info = "\n".join([f"- {a['nome']}: (Costo: {a['costo']}, Tipo: {a['tipo']})" for _, a in mie_abi.iterrows()])
             
-            # PROMPT "MURO DI MATTONI"
-            sys_msg = f"""Sei un MOTORE DI GIOCO NEUTRALE (Master). 
-            Giocatore Attuale: {nome_pg}.
+            # Lista nera per anti-puppeteering
+            lista_altri = [name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg]
+            str_blacklist = ", ".join(lista_altri)
+
+            sys_msg = f"""Sei il Master. Giocatore: {nome_pg}.
             
-            [BLACKLIST - PERSONAGGI VIETATI]
-            Tu NON puoi controllare, né far parlare, né descrivere i pensieri di: {str_blacklist}.
-            Questi sono altri GIOCATORI REALI.
-            
-            [REGOLA D'ORO ANTI-PUPPETEERING]
-            Se {nome_pg} parla o interagisce con uno dei nomi nella BLACKLIST:
-            1. TU DEVI FERMARTI.
-            2. Descrivi solo l'ambiente circostante (il vento, la luce, i suoni di fondo).
-            3. Descrivi la reazione generica dell'ambiente, MA NON LA RISPOSTA DEL PERSONAGGIO.
-            Esempio Corretto: "{nome_pg} si rivolge a Kaeryn. Il vento soffia tra gli alberi mentre aspettate una risposta."
-            Esempio SBAGLIATO (VIETATO): "Kaeryn sorride e risponde: 'Certo, andiamo!'" -> QUESTO È VIETATO.
+            [BLACKLIST UMANA]
+            Non controllare MAI: {str_blacklist}. Sono giocatori reali.
+            Se {nome_pg} parla a loro, descrivi l'ambiente e fermati.
             
             [INFO NEMICI]
             {nemici_presenti}
             
-            REGOLE MECCANICHE:
-            1. Attacco: d20 (11-14=1, 15-19=2, 20=3). Abilità: d20 + 1d4.
-            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (descrivi morte e cancella).
-            3. XP: Assegna solo se nemico muore.
+            [REGOLE]
+            1. Attacco: d20 (11-14=1, 15-19=2, 20=3).
+            2. Se Nemico muore, descrivilo.
+            3. Se il giocatore cambia luogo, aggiorna il tag LUOGO.
             
-            TAG OUTPUT (Invisibili al player):
+            TAG OUTPUT:
             DANNI_NEMICO: X
             DANNI_RICEVUTI: X
             MANA_USATO: X
@@ -232,19 +238,19 @@ if act := st.chat_input('Cosa fai?'):
             
             res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Abilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
             
+            # --- PARSING E SALVATAGGIO ---
             def get_tag(tag, text):
                 match = re.search(f"{tag}:\\s*(\\d+)", text)
                 return int(match.group(1)) if match else 0
             
             v_nem, v_ric, v_mn, v_vg, v_xp_proposed = get_tag("DANNI_NEMICO", res), get_tag("DANNI_RICEVUTI", res), get_tag("MANA_USATO", res), get_tag("VIGORE_USATO", res), get_tag("XP", res)
             
-            # Recupero luogo pulito
+            # Check cambio luogo
             loc_match = re.search(r"LUOGO:\s*(.+)", res)
             nuovo_luogo = loc_match.group(1).strip() if loc_match else pg['posizione']
             
+            # Gestione Nemici
             xp_confermato = 0
-            
-            # GESTIONE NEMICI
             t_match = re.search(r"NOME_NEMICO:\s*([^\n,]+)", res)
             if t_match and v_nem > 0:
                 bersaglio = t_match.group(1).strip()
@@ -257,14 +263,12 @@ if act := st.chat_input('Cosa fai?'):
                         xp_confermato = v_xp_proposed
                     conn.update(worksheet='nemici', data=df_n)
 
-            # Aggiornamento PG (incluso il cambio luogo se rilevato)
-            df_p.loc[df_p['username'] == st.session_state.user, ['hp', 'mana', 'vigore', 'ultimo_visto', 'posizione']] = [
-                max(0, int(pg['hp']) - v_ric), 
-                max(0, int(pg['mana']) - v_mn), 
-                max(0, int(pg['vigore']) - v_vg), 
-                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                nuovo_luogo
-            ]
+            # Aggiornamento PG (HP, Mana, Posizione)
+            df_p.at[pg_index, 'hp'] = max(0, int(pg['hp']) - v_ric)
+            df_p.at[pg_index, 'mana'] = max(0, int(pg['mana']) - v_mn)
+            df_p.at[pg_index, 'vigore'] = max(0, int(pg['vigore']) - v_vg)
+            df_p.at[pg_index, 'ultimo_visto'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            df_p.at[pg_index, 'posizione'] = nuovo_luogo # Se è cambiato, al prossimo refresh l'immagine si aggiornerà
             
             if xp_confermato > 0:
                 mask_gruppo = df_p['posizione'] == pg['posizione']
@@ -272,7 +276,7 @@ if act := st.chat_input('Cosa fai?'):
             
             conn.update(worksheet='personaggi', data=df_p)
             
-            # PULIZIA OUTPUT
+            # Pulizia Output
             testo_pulito = re.sub(r'(TAG OUTPUT:|DANNI_NEMICO:|DANNI_RICEVUTI:|MANA_USATO:|VIGORE_USATO:|XP:|NOME_NEMICO:|LUOGO:).*', '', res, flags=re.DOTALL).strip()
             
             new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_pg, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': testo_pulito}])], ignore_index=True)
