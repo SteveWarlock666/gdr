@@ -98,7 +98,7 @@ if user_pg_df.empty:
                 "posizione": "Strada per Gauvadon", 
                 "img": img_nuova,
                 "img_luogo": "",
-                "last_pos": "", # Iniziamo vuoto per forzare la prima generazione
+                "last_pos": "",
                 "ultimo_visto": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }])
             df_p = pd.concat([df_p, nuovo], ignore_index=True)
@@ -175,26 +175,22 @@ with st.sidebar:
 curr_pos = str(pg['posizione']).strip()
 last_pos = str(pg['last_pos']).strip()
 
-# Se il luogo è cambiato (o non c'è immagine salvata)
 if curr_pos != last_pos or len(pg['img_luogo']) < 5:
     with st.spinner(f"Il Master sta rivelando {curr_pos}..."):
         try:
-            # 1. Genera descrizione
             prompt_request = f"Create a short, vivid, dark fantasy visual description (max 15 words) for a place called: '{curr_pos}'. Focus on atmosphere, lighting and colors. No intro."
             vis_desc = client.chat.completions.create(messages=[{"role": "user", "content": prompt_request}], model="llama-3.3-70b-versatile").choices[0].message.content
             
-            # 2. Genera URL Immagine
-            safe_desc = urllib.parse.quote(vis_desc)
+            # Pulizia e Encoding URL per evitare link rotti
+            safe_desc = urllib.parse.quote(vis_desc.strip())
             new_img_url = f"https://image.pollinations.ai/prompt/{safe_desc}?width=1200&height=600&nologo=true&seed={int(time.time())}"
             
-            # 3. Aggiorna DB Personaggio
             df_p.at[pg_index, 'img_luogo'] = new_img_url
             df_p.at[pg_index, 'last_pos'] = curr_pos
             conn.update(worksheet='personaggi', data=df_p)
             
-            # 4. NOVITÀ: Inserisci l'immagine come messaggio in chat!
-            # Usiamo il markdown standard per le immagini: ![alt text](url)
-            img_msg_text = f"***\nNuova zona scoperta: {curr_pos}\n***\n![{curr_pos}]({new_img_url})"
+            # USA HTML INVECE DI MARKDOWN PER SICUREZZA
+            img_msg_text = f"***\nNuova zona scoperta: {curr_pos}\n***\n<img src='{new_img_url}' width='100%' style='border-radius:10px; margin-top:10px;'/>"
             
             new_img_msg = pd.DataFrame([{
                 'data': datetime.now().strftime('%H:%M'),
@@ -205,18 +201,18 @@ if curr_pos != last_pos or len(pg['img_luogo']) < 5:
             conn.update(worksheet='messaggi', data=df_m)
             
             st.cache_data.clear()
-            st.rerun() # Ricarica per mostrare subito l'immagine in chat
+            st.rerun()
 
         except Exception as e:
             st.error(f"Errore generazione ambientazione: {e}")
 
 # --- MOSTRA CHAT ---
 st.title('📜 Cronaca dell\'Abisso')
-# (L'immagine fissa sotto il titolo è stata rimossa)
 
-for _, r in df_m.tail(20).iterrows(): # Mostra gli ultimi 20 messaggi
+for _, r in df_m.tail(20).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
-        st.markdown(r['testo']) # Usa markdown per renderizzare l'immagine nel testo
+        # ABILITA HTML PER VEDERE LE IMMAGINI
+        st.markdown(r['testo'], unsafe_allow_html=True)
 
 # --- INPUT E LOGICA MASTER ---
 if act := st.chat_input('Cosa fai?'):
