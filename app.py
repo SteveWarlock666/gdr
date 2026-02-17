@@ -11,7 +11,7 @@ import hashlib
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
-# --- CSS INTEGRALE (NON TOCCARE) ---
+# --- CSS INTEGRALE ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; }
@@ -28,19 +28,21 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 if 'GROQ_API_KEY' not in st.secrets:
-    st.error("Manca la chiave!")
+    st.error("Chiave mancante")
     st.stop()
 
 client = Groq(api_key=st.secrets['GROQ_API_KEY'])
 conn = st.connection('gsheets', type=GSheetsConnection)
 
+# REFRESH AUTOMATICO 60 SECONDI
 st_autorefresh(interval=60000, key='global_sync')
 
 if 'auth' not in st.session_state:
     st.session_state.auth = False
 
+# --- LOGIN ---
 if not st.session_state.auth:
-    st.title('🌑 APOCRYPHA')
+    st.title('APOCRYPHA')
     u = st.text_input('Username')
     p = st.text_input('Password', type='password')
     if st.button('Entra'):
@@ -52,7 +54,7 @@ if not st.session_state.auth:
 
 XP_LEVELS = {1: 0, 2: 300, 3: 900, 4: 2700, 5: 6500}
 
-# --- CARICAMENTO DATI COMPLETO ---
+# --- CARICAMENTO DATI ---
 try:
     df_p = conn.read(worksheet='personaggi', ttl=0)
     df_m = conn.read(worksheet='messaggi', ttl=0).fillna('')
@@ -67,20 +69,19 @@ try:
     for c in cols_text:
         if c not in df_p.columns: df_p[c] = ''
     df_p = df_p.fillna('')
-
-except Exception as e:
-    st.warning("Sincronizzazione...")
+except:
+    st.warning("Sincronizzazione")
     st.stop()
 
 u_df = df_p[df_p['username'].astype(str) == str(st.session_state.user)]
 
 if u_df.empty:
-    st.title("🛡️ Crea il tuo Eroe")
+    st.title("Crea il tuo Eroe")
     with st.form("creazione_pg"):
         n_nuovo = st.text_input("Nome Eroe")
         r_nuova = st.selectbox("Razza", ["Primaris", "Inferis", "Narun", "Minotauro"])
         c_nuova = st.selectbox("Classe", ["Orrenai", "Elementalista", "Armagister", "Chierico"])
-        img_nuova = st.text_input("URL Avatar (.jpg/.png)")
+        img_nuova = st.text_input("URL Avatar")
         if st.form_submit_button("Inizia"):
             nuovo = pd.DataFrame([{"username": st.session_state.user, "nome_pg": n_nuovo, "razza": r_nuova, "classe": c_nuova, "hp": 20, "mana": 20, "vigore": 20, "xp": 0, "lvl": 1, "posizione": "Strada per Gauvadon", "img": img_nuova, "img_luogo": "", "last_pos": "", "ultimo_visto": datetime.now().strftime('%Y-%m-%d %H:%M:%S')}])
             conn.update(worksheet='personaggi', data=pd.concat([df_p, nuovo], ignore_index=True))
@@ -91,49 +92,49 @@ pg_idx = u_df.index[0]
 pg = df_p.loc[pg_idx]
 nome_pg = pg['nome_pg']
 
-# --- SIDEBAR INTEGRALE ---
+# --- SIDEBAR (Status Completo) ---
 with st.sidebar:
-    st.header('🛡️ SCHEDA EROE')
+    st.header('SCHEDA EROE')
     if len(str(pg['img'])) > 5: st.image(pg['img'], use_container_width=True)
     with st.container(border=True):
-        st.markdown(f"**{nome_pg}** (Lv. {int(pg['lvl'])})")
-        st.caption(f"📍 {pg['posizione']}")
+        st.markdown(f"**{nome_pg}** Lv. {int(pg['lvl'])}")
+        st.caption(f"Posizione: {pg['posizione']}")
         
-        st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">❤️ HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
+        st.markdown(f'<div class="compact-row" id="hp-bar"><p class="compact-label">HP: {int(pg["hp"])}/20</p>', unsafe_allow_html=True)
         st.progress(max(0.0, min(1.0, int(pg['hp']) / 20)))
         st.markdown('</div>', unsafe_allow_html=True)
         
-        st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">✨ MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True)
+        st.markdown(f'<div class="compact-row" id="mana-bar"><p class="compact-label">MN: {int(pg["mana"])}/20</p>', unsafe_allow_html=True)
         st.progress(max(0.0, min(1.0, int(pg['mana']) / 20)))
         st.markdown('</div>', unsafe_allow_html=True)
         
-        st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">⚡ VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True)
-        st.progress(max(0.0, min(1.0, int(pg['vigore']) / 20)))
+        st.markdown(f'<div class="compact-row" id="stamina-bar"><p class="compact-label">VG: {int(pg["vigore"])}/20</p>', unsafe_allow_html=True)
+        st.progress(max(0.0, min(1.0, int(pg["vigore"]) / 20)))
         st.markdown('</div>', unsafe_allow_html=True)
         
         st.divider()
         cur_xp, nxt_xp = int(pg['xp']), XP_LEVELS.get(int(pg['lvl']) + 1, 99999)
-        st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">📖 XP: {cur_xp}/{nxt_xp}</p>', unsafe_allow_html=True)
+        st.markdown(f'<div class="compact-row" id="xp-bar"><p class="compact-label">XP: {cur_xp}/{nxt_xp}</p>', unsafe_allow_html=True)
         st.progress(max(0.0, min(1.0, cur_xp / nxt_xp)))
         st.markdown('</div>', unsafe_allow_html=True)
 
-    st.write("📜 Abilità:")
-    mie_abi = df_a[df_a['proprietario'] == nome_pg]
-    for _, a in mie_abi.iterrows():
+    st.write("Abilita:")
+    m_a = df_a[df_a['proprietario'] == nome_pg]
+    for _, a in m_a.iterrows():
         with st.container(border=True):
             st.markdown(f"**{a['nome']}**")
-            st.caption(f"{a['tipo']} • Costo: {a['costo']}")
+            st.caption(f"{a['tipo']} Costo: {a['costo']}")
 
     st.divider()
-    st.write("👥 Compagni:")
+    st.write("Compagni:")
     comp = df_p[df_p['username'].astype(str) != str(st.session_state.user)]
     for _, c in comp.iterrows():
         with st.container(border=True):
             try:
                 uv = datetime.strptime(str(c['ultimo_visto']), '%Y-%m-%d %H:%M:%S')
-                st_icon = "🟢" if datetime.now() - uv < timedelta(minutes=10) else "🔴"
-            except: st_icon = "❓"
-            st.markdown(f"{st_icon} **{c['nome_pg']}**")
+                st_txt = "Online" if datetime.now() - uv < timedelta(minutes=10) else "Offline"
+            except: st_txt = "Unknown"
+            st.markdown(f"**{c['nome_pg']}** Status: {st_txt}")
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
 # --- LOGICA IMMAGINE AMBIENTE ---
@@ -141,7 +142,7 @@ curr_pos = str(pg['posizione']).strip()
 if curr_pos != str(pg['last_pos']).strip():
     seed = int(hashlib.sha256(curr_pos.encode('utf-8')).hexdigest(), 16) % 10**8
     safe_place = urllib.parse.quote(curr_pos)
-    new_url = f"https://image.pollinations.ai/prompt/dark%20fantasy%20scenery%20painting%20{safe_place}?width=1200&height=600&nologo=true&seed={seed}"
+    new_url = f"https://image.pollinations.ai/prompt/dark-fantasy-scenery-painting-{safe_place}?width=1200&height=600&nologo=true&seed={seed}"
     df_p.at[pg_idx, 'img_luogo'] = new_url
     df_p.at[pg_idx, 'last_pos'] = curr_pos
     conn.update(worksheet='personaggi', data=df_p)
@@ -151,13 +152,13 @@ if curr_pos != str(pg['last_pos']).strip():
     st.rerun()
 
 # --- CHAT UI ---
-st.title('📜 Cronaca dell\'Abisso')
-for _, r in df_m.tail(20).iterrows():
+st.title('Cronaca dell Abisso')
+for _, r in df_m.tail(25).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
         if str(r['testo']).startswith('IMG|'):
-            p = str(r['testo']).split('|')
-            st.write(f"***Nuova zona scoperta: {p[1]}***")
-            st.image(p[2], use_container_width=True)
+            p_img = str(r['testo']).split('|')
+            st.write(f"***Nuova zona scoperta: {p_img[1]}***")
+            st.image(p_img[2], use_container_width=True)
         else:
             st.markdown(r['testo'], unsafe_allow_html=True)
 
@@ -165,28 +166,24 @@ for _, r in df_m.tail(20).iterrows():
 if act := st.chat_input('Cosa fai?'):
     with st.spinner('Il Master narra...'):
         try:
-            abi_txt = "\n".join([f"- {a['nome']}" for _, a in mie_abi.iterrows()])
+            m_a_txt = "\n".join([f"- {a['nome']}" for _, a in m_a.iterrows()])
             altri = ", ".join([n for n in df_p['nome_pg'] if n != nome_pg])
-            sys_msg = f"""Sei il Master di 4 giocatori. Attuale: {nome_pg}. Altri: {altri}.
-            Scrivi SOLO la narrazione. NON citare mai blacklist o dati tecnici nel testo.
-            Inserisci ///DATI/// a fine messaggio.
-            TAG: DANNI_NEMICO, DANNI_RICEVUTI, MANA_USATO, VIGORE_USATO, XP, NOME_NEMICO, LUOGO."""
-            
-            res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Azione di {nome_pg}: {act}\nAbilità: {abi_txt}"}], model="llama-3.3-70b-versatile").choices[0].message.content
+            sys_msg = f"Sei il Master di 4 giocatori. Attuale: {nome_pg}. Altri: {altri}. Scrivi SOLO la narrazione. NON citare mai blacklist o dati tecnici nel testo. Inserisci ///DATI/// a fine messaggio. TAG: DANNI_NEMICO, DANNI_RICEVUTI, MANA_USATO, VIGORE_USATO, XP, NOME_NEMICO, LUOGO."
+            res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Azione di {nome_pg}: {act}\nAbilita: {m_a_txt}"}], model="llama-3.3-70b-versatile").choices[0].message.content
             
             parts = res.split('///DATI///')
             testo_pulito = parts[0].strip()
             dati = parts[1] if len(parts) > 1 else ""
-
+            
             def get_tag(tag, text):
                 m = re.search(f"{tag}:\\s*(\\d+)", text)
                 return int(m.group(1)) if m else 0
-
+            
             v_ric, v_mn, v_vg = get_tag("DANNI_RICEVUTI", dati), get_tag("MANA_USATO", dati), get_tag("VIGORE_USATO", dati)
             v_nem, v_xp = get_tag("DANNI_NEMICO", dati), get_tag("XP", dati)
             loc_m = re.search(r"LUOGO:\s*(.+)", dati)
             nuovo_luogo = loc_m.group(1).strip() if loc_m else pg['posizione']
-
+            
             df_p.at[pg_idx, 'hp'] = max(0, int(pg['hp']) - v_ric)
             df_p.at[pg_idx, 'mana'] = max(0, int(pg['mana']) - v_mn)
             df_p.at[pg_idx, 'vigore'] = max(0, int(pg['vigore']) - v_vg)
