@@ -145,6 +145,19 @@ with st.sidebar:
             st.caption(f"Status: {st_time}")
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
+# --- LOGICA IMMAGINE AMBIENTE ---
+curr_pos = str(pg['posizione']).strip()
+if curr_pos != str(pg['last_pos']).strip():
+    seed = int(hashlib.sha256(curr_pos.encode('utf-8')).hexdigest(), 16) % 10**8
+    safe_place = urllib.parse.quote(curr_pos)
+    new_url = f"https://image.pollinations.ai/prompt/dark-fantasy-scenery-painting-{safe_place}?width=1200&height=600&nologo=true&seed={seed}"
+    df_p.at[pg_idx, 'img_luogo'] = new_url
+    df_p.at[pg_idx, 'last_pos'] = curr_pos
+    conn.update(worksheet='personaggi', data=df_p)
+    new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': f"IMG|{curr_pos}|{new_url}"}])], ignore_index=True)
+    conn.update(worksheet='messaggi', data=new_m)
+    st.cache_data.clear()
+    st.rerun()
 
 # --- CHAT UI ---
 st.title('📜 Cronaca dell\'Abisso')
