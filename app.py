@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import re
 import time
 import urllib.parse
+import hashlib
 
 st.set_page_config(page_title='Apocrypha Master', layout='wide')
 
@@ -170,29 +171,29 @@ with st.sidebar:
             if status_time: st.caption(status_time)
             st.progress(max(0.0, min(1.0, int(c['hp']) / 20)))
 
-# --- LOGICA GENERAZIONE IMMAGINE (FIX SICUREZZA) ---
+# --- LOGICA GENERAZIONE IMMAGINE (SEMPLIFICATA E FUNZIONANTE) ---
 curr_pos = str(pg['posizione']).strip()
 last_pos = str(pg['last_pos']).strip()
 
 if curr_pos != last_pos or len(pg['img_luogo']) < 5:
     with st.spinner(f"Il Master sta rivelando {curr_pos}..."):
         try:
-            # 1. Genera descrizione
-            prompt_request = f"Create a short, vivid, dark fantasy visual description (max 15 words) for a place called: '{curr_pos}'. Focus on atmosphere, lighting and colors. No intro."
-            vis_desc = client.chat.completions.create(messages=[{"role": "user", "content": prompt_request}], model="llama-3.3-70b-versatile").choices[0].message.content
+            # 1. COSTRUZIONE LINK DIRETTA (Nessuna AI interemedia = Link Sicuro)
+            # Usiamo un seed basato sul nome del luogo, così è sempre uguale per quel luogo
+            seed = int(hashlib.sha256(curr_pos.encode('utf-8')).hexdigest(), 16) % 10**8
             
-            # 2. PULIZIA AGGRESSIVA (Rimuove caratteri strani che rompono i link)
-            clean_desc = re.sub(r'[^a-zA-Z0-9\s]', '', vis_desc).strip()
-            safe_desc = urllib.parse.quote(clean_desc)
+            # Codifichiamo solo il nome del luogo
+            safe_place = urllib.parse.quote(curr_pos)
             
-            # 3. URL Definitivo
-            new_img_url = f"https://image.pollinations.ai/prompt/{safe_desc}?width=1200&height=600&nologo=true&seed={int(time.time())}"
+            # Creiamo l'URL finale
+            new_img_url = f"https://image.pollinations.ai/prompt/dark%20fantasy%20scenery%20painting%20{safe_place}?width=1200&height=600&nologo=true&seed={seed}"
             
+            # Aggiornamento DB
             df_p.at[pg_index, 'img_luogo'] = new_img_url
             df_p.at[pg_index, 'last_pos'] = curr_pos
             conn.update(worksheet='personaggi', data=df_p)
             
-            # 4. SALVATAGGIO FORMATO SPECIALE "IMG|"
+            # Messaggio Chat Speciale
             img_msg_text = f"IMG|{curr_pos}|{new_img_url}"
             
             new_img_msg = pd.DataFrame([{
@@ -214,20 +215,18 @@ st.title('📜 Cronaca dell\'Abisso')
 
 for _, r in df_m.tail(20).iterrows():
     with st.chat_message("assistant" if r['autore'] == 'Master' else "user"):
-        # Controlla se è un messaggio speciale immagine (IMG|)
         if str(r['testo']).startswith('IMG|'):
             try:
                 parts = str(r['testo']).split('|')
-                # parts[1] è il nome del luogo, parts[2] è l'URL
                 if len(parts) >= 3:
                     st.write(f"***Nuova zona scoperta: {parts[1]}***")
-                    st.image(parts[2], use_container_width=True)
+                    # Render nativo Streamlit = Robustezza totale
+                    st.image(parts[2], use_container_width=True) 
                 else:
                     st.error("Errore formato immagine")
             except:
                 st.error("Immagine non caricabile")
         else:
-            # Messaggio normale (usa html per compatibilità vecchi messaggi)
             st.markdown(r['testo'], unsafe_allow_html=True)
 
 # --- INPUT E LOGICA MASTER ---
@@ -245,49 +244,58 @@ if act := st.chat_input('Cosa fai?'):
             lista_altri = [name for name in df_p['nome_pg'].astype(str).unique().tolist() if name != nome_pg]
             str_blacklist = ", ".join(lista_altri)
 
+            # PROMPT CON SEPARATORE NETTO
             sys_msg = f"""Sei un MOTORE DI GIOCO NEUTRALE (Master). 
             Giocatore Attuale: {nome_pg}.
             
-            [BLACKLIST - PERSONAGGI VIETATI]
-            Tu NON puoi controllare, né far parlare, né descrivere i pensieri di: {str_blacklist}.
-            Questi sono altri GIOCATORI REALI.
-            
-            [REGOLA D'ORO ANTI-PUPPETEERING]
-            Se {nome_pg} parla o interagisce con uno dei nomi nella BLACKLIST:
-            1. TU DEVI FERMARTI.
-            2. Descrivi solo l'ambiente circostante (il vento, la luce, i suoni di fondo).
-            3. Descrivi la reazione generica dell'ambiente, MA NON LA RISPOSTA DEL PERSONAGGIO.
+            [BLACKLIST]
+            NON controllare: {str_blacklist}. Se interagisce con loro, fermati.
             
             [INFO NEMICI]
             {nemici_presenti}
             
-            REGOLE MECCANICHE:
-            1. Attacco: d20 (11-14=1, 15-19=2, 20=3). Abilità: d20 + 1d4.
-            2. Se (HP Nemico - DANNI) <= 0, il nemico MUORE (descrivi morte e cancella).
-            3. XP: Assegna solo se nemico muore.
+            [ISTRUZIONI DI OUTPUT - FONDAMENTALE]
+            1. Scrivi PRIMA la narrazione della storia.
+            2. POI scrivi ESATTAMENTE questa stringa separatrice: ///DATI///
+            3. SOTTO il separatore, scrivi i dati tecnici.
             
-            TAG OUTPUT (Invisibili al player):
-            DANNI_NEMICO: X
-            DANNI_RICEVUTI: X
-            MANA_USATO: X
-            VIGORE_USATO: X
-            XP: X
-            NOME_NEMICO: nome
-            LUOGO: {pg['posizione']}"""
+            Esempio:
+            Il vento soffia tra gli alberi. Non succede nulla.
+            ///DATI///
+            DANNI_NEMICO: 0
+            DANNI_RICEVUTI: 0
+            MANA_USATO: 0
+            VIGORE_USATO: 0
+            XP: 0
+            NOME_NEMICO: Nessuno
+            LUOGO: {pg['posizione']}
+            """
             
             res = client.chat.completions.create(messages=[{"role": "system", "content": sys_msg}, {"role": "user", "content": f"Abilità: {abi_info}\nAzione: {act}"}], model="llama-3.3-70b-versatile").choices[0].message.content
+            
+            # --- PARSING ROBUSTO CON SEPARATORE ---
+            parts = res.split('///DATI///')
+            testo_pulito = parts[0].strip() # La storia è tutto ciò che c'è prima
+            
+            dati_tecnici = parts[1] if len(parts) > 1 else "" # I dati sono dopo
             
             def get_tag(tag, text):
                 match = re.search(f"{tag}:\\s*(\\d+)", text)
                 return int(match.group(1)) if match else 0
             
-            v_nem, v_ric, v_mn, v_vg, v_xp_proposed = get_tag("DANNI_NEMICO", res), get_tag("DANNI_RICEVUTI", res), get_tag("MANA_USATO", res), get_tag("VIGORE_USATO", res), get_tag("XP", res)
+            # Leggiamo i tag SOLO dalla parte tecnica
+            v_nem = get_tag("DANNI_NEMICO", dati_tecnici)
+            v_ric = get_tag("DANNI_RICEVUTI", dati_tecnici)
+            v_mn = get_tag("MANA_USATO", dati_tecnici)
+            v_vg = get_tag("VIGORE_USATO", dati_tecnici)
+            v_xp_proposed = get_tag("XP", dati_tecnici)
             
-            loc_match = re.search(r"LUOGO:\s*(.+)", res)
+            loc_match = re.search(r"LUOGO:\s*(.+)", dati_tecnici)
             nuovo_luogo = loc_match.group(1).strip() if loc_match else pg['posizione']
             
+            # LOGICA DI GIOCO (Update DB)
             xp_confermato = 0
-            t_match = re.search(r"NOME_NEMICO:\s*([^\n,]+)", res)
+            t_match = re.search(r"NOME_NEMICO:\s*([^\n,]+)", dati_tecnici)
             if t_match and v_nem > 0:
                 bersaglio = t_match.group(1).strip()
                 idx_nem = df_n[(df_n['nome_nemico'] == bersaglio) & (df_n['posizione'] == pg['posizione'])].index
@@ -311,8 +319,7 @@ if act := st.chat_input('Cosa fai?'):
             
             conn.update(worksheet='personaggi', data=df_p)
             
-            testo_pulito = re.sub(r'(TAG OUTPUT:|DANNI_NEMICO:|DANNI_RICEVUTI:|MANA_USATO:|VIGORE_USATO:|XP:|NOME_NEMICO:|LUOGO:).*', '', res, flags=re.DOTALL).strip()
-            
+            # Salvataggio Messaggio PULITO (senza dati)
             new_m = pd.concat([df_m, pd.DataFrame([{'data': datetime.now().strftime('%H:%M'), 'autore': nome_pg, 'testo': act}, {'data': datetime.now().strftime('%H:%M'), 'autore': 'Master', 'testo': testo_pulito}])], ignore_index=True)
             conn.update(worksheet='messaggi', data=new_m)
             
